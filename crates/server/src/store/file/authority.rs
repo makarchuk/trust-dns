@@ -426,6 +426,8 @@ impl FileAuthority {
 }
 
 impl Authority for FileAuthority {
+    type Lookup = AuthLookup;
+
     /// What type is this zone
     fn zone_type(&self) -> ZoneType {
         self.zone_type

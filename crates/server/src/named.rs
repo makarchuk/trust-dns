@@ -64,7 +64,7 @@ use trust_dns_server::store::sqlite::{SqliteAuthority, SqliteConfig};
 use trust_dns_server::store::StoreConfig;
 
 #[cfg_attr(not(feature = "dnssec"), allow(unused_mut))]
-fn load_zone(zone_dir: &Path, zone_config: &ZoneConfig) -> Result<Box<dyn Authority>, String> {
+fn load_zone(zone_dir: &Path, zone_config: &ZoneConfig) -> Result<Box<dyn Authority<Lookup = AuthLookup>>, String> {
     use std::path::PathBuf;
 
     debug!("loading zone with config: {:#?}", zone_config);
@@ -81,7 +81,7 @@ fn load_zone(zone_dir: &Path, zone_config: &ZoneConfig) -> Result<Box<dyn Author
     }
 
     // load the zone
-    let mut authority: Box<dyn Authority> = match zone_config.stores {
+    let mut authority: Box<dyn Authority<Lookup = AuthLookup>> = match zone_config.stores {
         Some(StoreConfig::Sqlite(ref config)) => {
             if zone_path.is_some() {
                 warn!("ignoring [[zones.file]] instead using [[zones.stores.zone_file_path]]");
@@ -152,7 +152,7 @@ fn load_zone(zone_dir: &Path, zone_config: &ZoneConfig) -> Result<Box<dyn Author
 
     #[cfg(feature = "dnssec")]
     fn load_keys(
-        authority: &mut dyn Authority,
+        authority: &mut dyn Authority<Lookup = AuthLookup>,
         zone_name: Name,
         zone_config: &ZoneConfig,
     ) -> Result<(), String> {
@@ -194,7 +194,7 @@ fn load_zone(zone_dir: &Path, zone_config: &ZoneConfig) -> Result<Box<dyn Author
 
     #[cfg(not(feature = "dnssec"))]
     fn load_keys(
-        _authority: &mut dyn Authority,
+        _authority: &mut dyn Authority<Lookup = AuthLookup>,
         _zone_name: Name,
         _zone_config: &ZoneConfig,
     ) -> Result<(), String> {

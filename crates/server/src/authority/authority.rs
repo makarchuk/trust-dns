@@ -16,6 +16,9 @@ use authority::{AuthLookup, MessageRequest, UpdateResult, ZoneType};
 
 /// Authority implementations can be used with a `Catalog`
 pub trait Authority: Send {
+    /// Result of a lookup
+    type Lookup;
+
     /// What type is this zone
     fn zone_type(&self) -> ZoneType;
 
