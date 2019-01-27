@@ -9,7 +9,7 @@
 
 mod config;
 pub mod file;
-mod forwarder;
+pub mod forwarder;
 pub mod sqlite;
 
 // TODO: add a dynamic library option?

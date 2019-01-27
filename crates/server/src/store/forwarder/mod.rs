@@ -8,3 +8,5 @@
 #![cfg(feature = "trust-dns-resolver")]
 
 mod authority;
+
+pub use self::authority::ForwardAuthority;

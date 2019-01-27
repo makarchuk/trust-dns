@@ -5,10 +5,14 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use std::borrow::Borrow;
+
+use trust_dns::op::LowerQuery;
 use trust_dns::op::ResponseCode;
 use trust_dns::rr::dnssec::{DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey};
-use trust_dns_resolver::AsyncResolver;
+use trust_dns_resolver::Resolver;
+use trust_dns_resolver::lookup::Lookup as ResolverLookup;
 
 
 use authority::{
@@ -17,11 +21,22 @@ use authority::{
 
 pub struct ForwardAuthority {
     origin: LowerName,
-    resolver: AsyncResolver,
+    /// FIXME: need to change Authority to be Async
+    resolver: Resolver,
+}
+
+impl ForwardAuthority {
+    // FIXME: read from configuration
+    pub fn new() -> Self {
+        ForwardAuthority {
+            origin: Name::root().into(),
+            resolver: Resolver::from_system_conf().unwrap(),
+        }
+    }
 }
 
 impl Authority for ForwardAuthority {
-    type Lookup = AuthLookup;
+    type Lookup = ResolverLookup;
 
     /// Always Forward
     fn zone_type(&self) -> ZoneType {
@@ -53,11 +68,20 @@ impl Authority for ForwardAuthority {
         rtype: RecordType,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> AuthLookup {
-        self.origin.zone_of(name);
+    ) -> Self::Lookup {
+        // FIXME: make this an error
+        assert!(self.origin.zone_of(name));
         
-        unimplemented!()
-        // self.resolver.lookup()
+        self.resolver.lookup(&Borrow::<Name>::borrow(name).to_utf8(), rtype).unwrap()
+    }
+
+    fn search(
+        &self,
+        query: &LowerQuery,
+        is_secure: bool,
+        supported_algorithms: SupportedAlgorithms,
+    ) -> Self::Lookup {
+        self.lookup(query.name(), query.query_type(), is_secure, supported_algorithms)
     }
 
     fn get_nsec_records(
@@ -65,7 +89,7 @@ impl Authority for ForwardAuthority {
         name: &LowerName,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> AuthLookup {
+    ) -> Self::Lookup {
         unimplemented!()
     }
 
