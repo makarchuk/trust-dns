@@ -17,6 +17,7 @@ use trust_dns::op::{LowerQuery, ResponseCode};
 use trust_dns::rr::dnssec::{DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey};
 
+use authority::LookupResult;
 use authority::{
     AnyRecords, AuthLookup, Authority, LookupRecords, MessageRequest, UpdateResult, ZoneType,
 };
@@ -134,7 +135,7 @@ impl FileAuthority {
 
     /// Returns the minimum ttl (as used in the SOA record)
     pub fn minimum_ttl(&self) -> u32 {
-        self.soa().iter().next().map_or(0, |soa| {
+        Authority::soa(self).iter().next().map_or(0, |soa| {
             if let RData::SOA(ref rdata) = *soa.rdata() {
                 rdata.minimum()
             } else {
@@ -145,7 +146,7 @@ impl FileAuthority {
 
     /// get the current serial number for the zone.
     pub fn serial(&self) -> u32 {
-        self.soa().iter().next().map_or_else(
+        Authority::soa(self).iter().next().map_or_else(
             || {
                 warn!("no soa record found for zone: {}", self.origin);
                 0
@@ -162,7 +163,7 @@ impl FileAuthority {
 
     #[allow(unused)]
     fn increment_soa_serial(&mut self) -> u32 {
-        let opt_soa_serial = self.soa().iter().next().map(|soa| {
+        let opt_soa_serial = Authority::soa(self).iter().next().map(|soa| {
             // TODO: can we get a mut reference to SOA directly?
             let mut soa: Record = soa.clone();
 
@@ -301,7 +302,7 @@ impl FileAuthority {
                     RecordType::DNSSEC(DNSSECRecordType::NSEC),
                     ttl,
                 );
-                let rdata = NSEC::new_cover_self(self.origin().clone().into(), vec);
+                let rdata = NSEC::new_cover_self(Authority::origin(self).clone().into(), vec);
                 record.set_rdata(RData::DNSSEC(DNSSECRData::NSEC(rdata)));
                 records.push(record);
             }
@@ -581,11 +582,11 @@ impl Authority for FileAuthority {
         //  for AXFR the first and last record must be the SOA
         if RecordType::AXFR == record_type {
             // TODO: support more advanced AXFR options
-            if !self.is_axfr_allowed() {
+            if !Authority::is_axfr_allowed(self) {
                 return AuthLookup::Refused;
             }
 
-            match self.zone_type() {
+            match Authority::zone_type(self) {
                 ZoneType::Master | ZoneType::Slave => (),
                 // TODO: Forward?
                 _ => return AuthLookup::NxDomain, // TODO: this sould be an error.
@@ -594,15 +595,24 @@ impl Authority for FileAuthority {
 
         // perform the actual lookup
         match record_type {
-            RecordType::SOA => {
-                self.lookup(self.origin(), record_type, is_secure, supported_algorithms)
-            }
+            RecordType::SOA => Authority::lookup(
+                self,
+                Authority::origin(self),
+                record_type,
+                is_secure,
+                supported_algorithms,
+            ),
             RecordType::AXFR => {
                 // FIXME: shouldn't these SOA's be secure? at least the first, perhaps not the last?
-                let start_soa = self.soa_secure(is_secure, supported_algorithms);
-                let end_soa = self.soa();
-                let records =
-                    self.lookup(lookup_name, record_type, is_secure, supported_algorithms);
+                let start_soa = Authority::soa_secure(self, is_secure, supported_algorithms);
+                let end_soa = Authority::soa(self);
+                let records = Authority::lookup(
+                    self,
+                    lookup_name,
+                    record_type,
+                    is_secure,
+                    supported_algorithms,
+                );
 
                 match start_soa {
                     l @ AuthLookup::NxDomain | l @ AuthLookup::NameExists => l,
@@ -613,7 +623,13 @@ impl Authority for FileAuthority {
                     },
                 }
             }
-            _ => self.lookup(lookup_name, record_type, is_secure, supported_algorithms),
+            _ => Authority::lookup(
+                self,
+                lookup_name,
+                record_type,
+                is_secure,
+                supported_algorithms,
+            ),
         }
     }
 
@@ -726,7 +742,7 @@ impl Authority for FileAuthority {
     /// * `signer` - Signer with associated private key
     #[cfg(feature = "dnssec")]
     fn add_zone_signing_key(&mut self, signer: Signer) -> DnsSecResult<()> {
-        use trust_dns::rr::rdata::{DNSSECRData, DNSSECRecordType};
+        use trust_dns::rr::rdata::DNSSECRData;
 
         // also add the key to the zone
         let zone_ttl = self.minimum_ttl();
@@ -794,7 +810,8 @@ mod tests {
         )
         .expect("failed to load file");
 
-        let lookup = authority.lookup(
+        let lookup = Authority::lookup(
+            &authority,
             &LowerName::from_str("www.example.com.").unwrap(),
             RecordType::A,
             false,

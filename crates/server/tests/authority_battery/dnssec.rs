@@ -169,7 +169,10 @@ pub fn test_nsec_nxdomain_wraps_end<A: Authority<Lookup = AuthLookup>>(authority
     assert!(xfer::secure_dns_handle::verify_nsec(&query, &Name::from_str("example.com.").unwrap(), &nsecs));
 }
 
-pub fn test_rfc_6975_supported_algorithms<A: Authority<Lookup = AuthLookup>>(authority: A, keys: &[DNSKEY]) {
+pub fn test_rfc_6975_supported_algorithms<A: Authority<Lookup = AuthLookup>>(
+    authority: A,
+    keys: &[DNSKEY],
+) {
     // for each key, see that supported algorithms are restricted to that individual key
     for key in keys {
         println!("key algorithm: {}", key.algorithm());

@@ -5,8 +5,11 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-#![cfg(feature = "trust-dns-resolver")]
+use trust_dns::op::ResponseCode;
 
-mod authority;
+pub enum LookupError {
+    /// There was an error performing the lookup
+    Code(ResponseCode),
+}
 
-pub use self::authority::ForwardAuthority;
+pub type LookupResult<T> = Result<T, LookupError>;

@@ -37,14 +37,20 @@ pub enum ZoneType {
 mod auth_lookup;
 #[allow(clippy::module_inception)]
 mod authority;
+pub(crate) mod authority_object;
 mod catalog;
+pub(crate) mod lookup_object;
 pub(crate) mod message_request;
 mod message_response;
+mod result;
 
 pub use self::auth_lookup::{
     AnyRecords, AuthLookup, AuthLookupIter, LookupRecords, LookupRecordsIter,
 };
 pub use self::authority::Authority;
+pub use self::authority_object::AuthorityObject;
 pub use self::catalog::Catalog;
+pub use self::lookup_object::LookupObject;
 pub use self::message_request::{MessageRequest, Queries, UpdateRequest};
 pub use self::message_response::{MessageResponse, MessageResponseBuilder};
+pub use self::result::{LookupError, LookupResult};

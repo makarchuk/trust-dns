@@ -13,11 +13,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use trust_dns::op::LowerQuery;
+use trust_dns::op::ResponseCode;
 use trust_dns::proto::rr::dnssec::rdata::key::KEY;
 #[cfg(feature = "dnssec")]
 use trust_dns::proto::rr::dnssec::rdata::DNSSECRData;
-use trust_dns::op::ResponseCode;
-use trust_dns::op::LowerQuery;
 use trust_dns::rr::dnssec::{DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordType, RrKey};
 
@@ -143,7 +143,8 @@ impl SqliteAuthority {
                 allow_axfr,
                 root_dir,
                 &file_config,
-            )?.unwrap_records();
+            )?
+            .unwrap_records();
 
             let mut authority = SqliteAuthority::new(
                 zone_name.clone(),
@@ -410,70 +411,86 @@ impl SqliteAuthority {
             }
 
             match require.dns_class() {
-                DNSClass::ANY => if let RData::NULL(..) = *require.rdata() {
-                    match require.rr_type() {
-                        // ANY      ANY      empty    Name is in use
-                        RecordType::ANY => {
-                            if self
-                                .lookup(
-                                    &required_name,
-                                    RecordType::ANY,
-                                    false,
-                                    SupportedAlgorithms::new(),
-                                ).was_empty()
-                            {
-                                return Err(ResponseCode::NXDomain);
-                            } else {
-                                continue;
+                DNSClass::ANY => {
+                    if let RData::NULL(..) = *require.rdata() {
+                        match require.rr_type() {
+                            // ANY      ANY      empty    Name is in use
+                            RecordType::ANY => {
+                                if self
+                                    .lookup(
+                                        &required_name,
+                                        RecordType::ANY,
+                                        false,
+                                        SupportedAlgorithms::new(),
+                                    )
+                                    .was_empty()
+                                {
+                                    return Err(ResponseCode::NXDomain);
+                                } else {
+                                    continue;
+                                }
+                            }
+                            // ANY      rrset    empty    RRset exists (value independent)
+                            rrset => {
+                                if self
+                                    .lookup(
+                                        &required_name,
+                                        rrset,
+                                        false,
+                                        SupportedAlgorithms::new(),
+                                    )
+                                    .was_empty()
+                                {
+                                    return Err(ResponseCode::NXRRSet);
+                                } else {
+                                    continue;
+                                }
                             }
                         }
-                        // ANY      rrset    empty    RRset exists (value independent)
-                        rrset => {
-                            if self
-                                .lookup(&required_name, rrset, false, SupportedAlgorithms::new())
-                                .was_empty()
-                            {
-                                return Err(ResponseCode::NXRRSet);
-                            } else {
-                                continue;
-                            }
-                        }
+                    } else {
+                        return Err(ResponseCode::FormErr);
                     }
-                } else {
-                    return Err(ResponseCode::FormErr);
-                },
-                DNSClass::NONE => if let RData::NULL(..) = *require.rdata() {
-                    match require.rr_type() {
-                        // NONE     ANY      empty    Name is not in use
-                        RecordType::ANY => {
-                            if !self
-                                .lookup(
-                                    &required_name,
-                                    RecordType::ANY,
-                                    false,
-                                    SupportedAlgorithms::new(),
-                                ).was_empty()
-                            {
-                                return Err(ResponseCode::YXDomain);
-                            } else {
-                                continue;
+                }
+                DNSClass::NONE => {
+                    if let RData::NULL(..) = *require.rdata() {
+                        match require.rr_type() {
+                            // NONE     ANY      empty    Name is not in use
+                            RecordType::ANY => {
+                                if !self
+                                    .lookup(
+                                        &required_name,
+                                        RecordType::ANY,
+                                        false,
+                                        SupportedAlgorithms::new(),
+                                    )
+                                    .was_empty()
+                                {
+                                    return Err(ResponseCode::YXDomain);
+                                } else {
+                                    continue;
+                                }
+                            }
+                            // NONE     rrset    empty    RRset does not exist
+                            rrset => {
+                                if !self
+                                    .lookup(
+                                        &required_name,
+                                        rrset,
+                                        false,
+                                        SupportedAlgorithms::new(),
+                                    )
+                                    .was_empty()
+                                {
+                                    return Err(ResponseCode::YXRRSet);
+                                } else {
+                                    continue;
+                                }
                             }
                         }
-                        // NONE     rrset    empty    RRset does not exist
-                        rrset => {
-                            if !self
-                                .lookup(&required_name, rrset, false, SupportedAlgorithms::new())
-                                .was_empty()
-                            {
-                                return Err(ResponseCode::YXRRSet);
-                            } else {
-                                continue;
-                            }
-                        }
+                    } else {
+                        return Err(ResponseCode::FormErr);
                     }
-                } else {
-                    return Err(ResponseCode::FormErr);
-                },
+                }
                 class if class == self.class =>
                 // zone     rrset    rr       RRset exists (value dependent)
                 {
@@ -483,7 +500,8 @@ impl SqliteAuthority {
                             require.rr_type(),
                             false,
                             SupportedAlgorithms::new(),
-                        ).iter()
+                        )
+                        .iter()
                         .find(|rr| *rr == require)
                         .is_none()
                     {
@@ -550,42 +568,47 @@ impl SqliteAuthority {
         // verify sig0, currently the only authorization that is accepted.
         let sig0s: &[Record] = update_message.sig0();
         debug!("authorizing with: {:?}", sig0s);
-        if !sig0s.is_empty() && sig0s
-            .iter()
-            .filter_map(|sig0| {
-                if let RData::DNSSEC(DNSSECRData::SIG(ref sig)) = *sig0.rdata() {
-                    Some(sig)
-                } else {
-                    None
-                }
-            }).any(|sig| {
-                let name = LowerName::from(sig.signer_name());
-                let keys = self.lookup(
-                    &name,
-                    RecordType::DNSSEC(DNSSECRecordType::KEY),
-                    false,
-                    SupportedAlgorithms::new(),
-                );
-                debug!("found keys {:?}", keys);
-                // FIXME: check key usage flags and restrictions
-                keys.iter()
-                    .filter_map(|rr_set| {
-                        if let RData::DNSSEC(DNSSECRData::KEY(ref key)) = *rr_set.rdata() {
-                            Some(key)
-                        } else {
-                            None
-                        }
-                    }).any(|key| {
-                        key.verify_message(update_message, sig.sig(), sig)
-                            .map(|_| {
-                                info!("verified sig: {:?} with key: {:?}", sig, key);
-                                true
-                            }).unwrap_or_else(|_| {
-                                debug!("did not verify sig: {:?} with key: {:?}", sig, key);
-                                false
-                            })
-                    })
-            }) {
+        if !sig0s.is_empty()
+            && sig0s
+                .iter()
+                .filter_map(|sig0| {
+                    if let RData::DNSSEC(DNSSECRData::SIG(ref sig)) = *sig0.rdata() {
+                        Some(sig)
+                    } else {
+                        None
+                    }
+                })
+                .any(|sig| {
+                    let name = LowerName::from(sig.signer_name());
+                    let keys = self.lookup(
+                        &name,
+                        RecordType::DNSSEC(DNSSECRecordType::KEY),
+                        false,
+                        SupportedAlgorithms::new(),
+                    );
+                    debug!("found keys {:?}", keys);
+                    // FIXME: check key usage flags and restrictions
+                    keys.iter()
+                        .filter_map(|rr_set| {
+                            if let RData::DNSSEC(DNSSECRData::KEY(ref key)) = *rr_set.rdata() {
+                                Some(key)
+                            } else {
+                                None
+                            }
+                        })
+                        .any(|key| {
+                            key.verify_message(update_message, sig.sig(), sig)
+                                .map(|_| {
+                                    info!("verified sig: {:?} with key: {:?}", sig, key);
+                                    true
+                                })
+                                .unwrap_or_else(|_| {
+                                    debug!("did not verify sig: {:?} with key: {:?}", sig, key);
+                                    false
+                                })
+                        })
+                })
+        {
             return Ok(());
         } else {
             warn!(
@@ -653,7 +676,7 @@ impl SqliteAuthority {
             if class == self.class {
                 match rr.rr_type() {
                     RecordType::ANY | RecordType::AXFR | RecordType::IXFR => {
-                        return Err(ResponseCode::FormErr)
+                        return Err(ResponseCode::FormErr);
                     }
                     _ => (),
                 }
@@ -670,7 +693,7 @@ impl SqliteAuthority {
                         }
                         match rr.rr_type() {
                             RecordType::AXFR | RecordType::IXFR => {
-                                return Err(ResponseCode::FormErr)
+                                return Err(ResponseCode::FormErr);
                             }
                             _ => (),
                         }
@@ -681,7 +704,7 @@ impl SqliteAuthority {
                         }
                         match rr.rr_type() {
                             RecordType::ANY | RecordType::AXFR | RecordType::IXFR => {
-                                return Err(ResponseCode::FormErr)
+                                return Err(ResponseCode::FormErr);
                             }
                             _ => (),
                         }
@@ -818,7 +841,8 @@ impl SqliteAuthority {
                                     !((k.record_type == RecordType::SOA
                                         || k.record_type == RecordType::NS)
                                         && k.name != self.origin)
-                                }).filter(|k| k.name == rr_name)
+                                })
+                                .filter(|k| k.name == rr_name)
                                 .cloned()
                                 .collect::<Vec<RrKey>>();
                             for delete in to_delete {
@@ -1425,7 +1449,7 @@ impl Authority for SqliteAuthority {
     /// * `signer` - Signer with associated private key
     #[cfg(feature = "dnssec")]
     fn add_zone_signing_key(&mut self, signer: Signer) -> DnsSecResult<()> {
-        use trust_dns::rr::rdata::{DNSSECRData, DNSSECRecordType};
+        use trust_dns::rr::rdata::DNSSECRData;
 
         // also add the key to the zone
         let zone_ttl = self.minimum_ttl();

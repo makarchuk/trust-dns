@@ -26,14 +26,13 @@ use trust_dns::rr::dnssec::{Algorithm, SupportedAlgorithms};
 use trust_dns::rr::rdata::opt::{EdnsCode, EdnsOption};
 use trust_dns::rr::{LowerName, RecordType};
 
-use authority::{
-    AuthLookup, Authority, MessageRequest, MessageResponse, MessageResponseBuilder, ZoneType,
-};
+use authority::{AuthLookup, MessageRequest, MessageResponse, MessageResponseBuilder, ZoneType};
+use authority::{AuthorityObject, LookupObject};
 
 /// Set of authorities, zones, available to this server.
 #[derive(Default)]
 pub struct Catalog {
-    authorities: HashMap<LowerName, RwLock<Box<dyn Authority<Lookup = AuthLookup>>>>,
+    authorities: HashMap<LowerName, RwLock<Box<dyn AuthorityObject>>>,
 }
 
 fn send_response<R: ResponseHandler + 'static>(
@@ -159,12 +158,12 @@ impl Catalog {
     ///
     /// * `name` - zone name, e.g. example.com.
     /// * `authority` - the zone data
-    pub fn upsert(&mut self, name: LowerName, authority: Box<dyn Authority<Lookup = AuthLookup>>) {
+    pub fn upsert(&mut self, name: LowerName, authority: Box<dyn AuthorityObject>) {
         self.authorities.insert(name, RwLock::new(authority));
     }
 
     /// Remove a zone from the catalog
-    pub fn remove(&mut self, name: &LowerName) -> Option<RwLock<Box<dyn Authority<Lookup = AuthLookup>>>> {
+    pub fn remove(&mut self, name: &LowerName) -> Option<RwLock<Box<dyn AuthorityObject>>> {
         self.authorities.remove(name)
     }
 
@@ -382,60 +381,56 @@ impl Catalog {
                     );
                 }
 
-                let records = authority.search(query, is_dnssec, supported_algorithms);
+                let records: Box<dyn LookupObject> =
+                    authority.search(query, is_dnssec, supported_algorithms);
 
                 // setup headers
                 //  and add records
-                let (ns, soa) = if !records.is_empty() {
-                    response_header.set_response_code(ResponseCode::NoError);
-                    // get the NS records
-                    let ns = authority.ns(is_dnssec, supported_algorithms);
-                    // chain here to match type below...
-                    (ns, AuthLookup::NxDomain)
-                } else if records.is_refused() {
-                    response_header.set_response_code(ResponseCode::Refused);
-                    (AuthLookup::NxDomain, AuthLookup::NxDomain)
-                } else {
-                    // in the not found case it's standard to return the SOA in the authority section
-                    //   if the name is in this zone, etc.
-                    // see https://tools.ietf.org/html/rfc2308 for proper response construct
-                    match records {
-                        AuthLookup::NxDomain => {
-                            response_header.set_response_code(ResponseCode::NXDomain);
-                        }
-                        AuthLookup::NameExists => {
-                            response_header.set_response_code(ResponseCode::NoError);
-                        }
-                        AuthLookup::Refused => {
-                            panic!("programming error, should have return Refused above")
-                        }
-                        AuthLookup::Records(_) | AuthLookup::SOA(_) | AuthLookup::AXFR { .. } => {
-                            panic!(
-                                "programming error, should have return NoError with records above"
-                            )
-                        }
-                    }
+                let (ns, soa): (Box<dyn LookupObject>, Box<dyn LookupObject>) =
+                    if !records.is_empty() {
+                        response_header.set_response_code(ResponseCode::NoError);
+                        response_header.set_authoritative(true);
+                        // get the NS records
+                        let ns = authority.ns(is_dnssec, supported_algorithms);
+                        // chain here to match type below...
+                        (ns, Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>)
+                    } else if records.is_refused() {
+                        response_header.set_response_code(ResponseCode::Refused);
 
-                    // in the dnssec case, nsec records should exist, we return NoError + NoData + NSec...
-                    let ns: AuthLookup = if is_dnssec {
-                        // get NSEC records
-                        let mut nsecs = authority.get_nsec_records(
-                            query.name(),
-                            is_dnssec,
-                            supported_algorithms,
-                        );
-                        debug!("request: {} non-existent adding nsecs", request.id(),);
-
-                        nsecs
+                        (
+                            Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>,
+                            Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>,
+                        )
                     } else {
-                        // place holder...
-                        debug!("request: {} non-existent", request.id());
-                        AuthLookup::NxDomain
-                    };
+                        // in the not found case it's standard to return the SOA in the authority section
+                        //   if the name is in this zone, etc.
+                        // see https://tools.ietf.org/html/rfc2308 for proper response construct
+                        if records.is_nx_domain() {
+                            response_header.set_response_code(ResponseCode::NXDomain);
+                        } else if records.is_name_exists() {
+                            response_header.set_response_code(ResponseCode::NoError);
+                        };
 
-                    let soa = authority.soa_secure(is_dnssec, supported_algorithms);
-                    (ns, soa)
-                };
+                        // in the dnssec case, nsec records should exist, we return NoError + NoData + NSec...
+                        let ns: Box<dyn LookupObject> = if is_dnssec {
+                            // get NSEC records
+                            let mut nsecs = authority.get_nsec_records(
+                                query.name(),
+                                is_dnssec,
+                                supported_algorithms,
+                            );
+                            debug!("request: {} non-existent adding nsecs", request.id(),);
+
+                            nsecs
+                        } else {
+                            // place holder...
+                            debug!("request: {} non-existent", request.id());
+                            Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>
+                        };
+
+                        let soa = authority.soa_secure(is_dnssec, supported_algorithms);
+                        (ns, soa)
+                    };
 
                 return send_response(
                     response_edns,
@@ -454,7 +449,7 @@ impl Catalog {
     }
 
     /// Recursively searches the catalog for a matching authority
-    pub fn find(&self, name: &LowerName) -> Option<&RwLock<Box<dyn Authority<Lookup = AuthLookup>>>> {
+    pub fn find(&self, name: &LowerName) -> Option<&RwLock<Box<dyn AuthorityObject>>> {
         self.authorities.get(name).or_else(|| {
             let name = name.base_name();
             if !name.is_root() {

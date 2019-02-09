@@ -9,6 +9,7 @@ use std::iter::Chain;
 use std::slice::Iter;
 use std::sync::Arc;
 
+use authority::LookupObject;
 use proto::rr::dnssec::SupportedAlgorithms;
 use proto::rr::{Record, RecordSet, RecordType, RrsetRecords};
 use trust_dns::rr::LowerName;
@@ -96,6 +97,29 @@ impl AuthLookup {
             AuthLookup::Records(records) => records,
             _ => LookupRecords::default(),
         }
+    }
+}
+
+impl LookupObject for AuthLookup {
+    fn is_empty(&self) -> bool {
+        AuthLookup::is_empty(self)
+    }
+
+    fn is_name_exists(&self) -> bool {
+        AuthLookup::is_name_exists(self)
+    }
+
+    fn is_nx_domain(&self) -> bool {
+        AuthLookup::is_nx_domain(self)
+    }
+
+    fn is_refused(&self) -> bool {
+        AuthLookup::is_refused(self)
+    }
+
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {
+        let boxed_iter = AuthLookup::iter(self);
+        Box::new(boxed_iter)
     }
 }
 
@@ -248,7 +272,8 @@ impl<'r> Iterator for AnyRecordsIter<'r> {
                     .by_ref()
                     .filter(|rr_set| {
                         query_type == RecordType::ANY || rr_set.record_type() != RecordType::SOA
-                    }).find(|rr_set| {
+                    })
+                    .find(|rr_set| {
                         query_type == RecordType::AXFR
                             || &LowerName::from(rr_set.name()) == query_name
                     });
@@ -281,7 +306,14 @@ pub enum LookupRecords {
     /// There is no record for the given query, but there are other records at that name
     NameExists,
     /// The associate records
-    Records(bool, SupportedAlgorithms, Arc<RecordSet>),
+    Records {
+        /// was the search a secure search
+        is_secure: bool,
+        /// what are the requests supported algorithms
+        supported_algorithms: SupportedAlgorithms,
+        /// the records found based on the query
+        records: Arc<RecordSet>,
+    },
     /// Vec of disjoint record sets
     ManyRecords(bool, SupportedAlgorithms, Vec<Arc<RecordSet>>),
     // TODO: need a better option for very large zone xfrs...
@@ -296,7 +328,11 @@ impl LookupRecords {
         supported_algorithms: SupportedAlgorithms,
         records: Arc<RecordSet>,
     ) -> Self {
-        LookupRecords::Records(is_secure, supported_algorithms, records)
+        LookupRecords::Records {
+            is_secure,
+            supported_algorithms,
+            records,
+        }
     }
 
     /// Construct a new LookupRecords over a set of ResordSets
@@ -350,9 +386,11 @@ impl<'a> IntoIterator for &'a LookupRecords {
     fn into_iter(self) -> Self::IntoIter {
         match self {
             LookupRecords::NxDomain | LookupRecords::NameExists => LookupRecordsIter::Empty,
-            LookupRecords::Records(is_secure, supported_algorithms, r) => {
-                LookupRecordsIter::RecordsIter(r.records(*is_secure, *supported_algorithms))
-            }
+            LookupRecords::Records {
+                is_secure,
+                supported_algorithms,
+                records,
+            } => LookupRecordsIter::RecordsIter(records.records(*is_secure, *supported_algorithms)),
             LookupRecords::ManyRecords(is_secure, supported_algorithms, r) => {
                 LookupRecordsIter::ManyRecordsIter(r.iter().map(|r| r.records(*is_secure, *supported_algorithms)).collect(), None)
             }

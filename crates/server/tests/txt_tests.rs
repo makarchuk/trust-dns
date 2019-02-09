@@ -10,7 +10,7 @@ use trust_dns::proto::rr::rdata::tlsa::*;
 use trust_dns::rr::dnssec::*;
 use trust_dns::rr::*;
 use trust_dns::serialize::txt::*;
-use trust_dns_server::authority::*;
+use trust_dns_server::authority::{Authority, ZoneType};
 use trust_dns_server::store::sqlite::SqliteAuthority;
 
 #[test]
@@ -117,7 +117,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::NS,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .cloned()
         .collect();
     let mut compare = vec![
@@ -150,7 +151,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::MX,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .cloned()
         .collect();
     let mut compare = vec![
@@ -182,7 +184,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::A,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .cloned()
         .next()
         .unwrap();
@@ -203,7 +206,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::AAAA,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .unwrap();
@@ -224,7 +228,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::A,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .unwrap();
@@ -246,7 +251,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::TXT,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .cloned()
         .collect();
     let compare: Vec<Vec<Box<[u8]>>> = vec![
@@ -290,7 +296,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::PTR,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .unwrap();
@@ -307,7 +314,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::SRV,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .unwrap();
@@ -327,7 +335,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::A,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .unwrap();
@@ -348,7 +357,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::CAA,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .expect("nocerts not found");
@@ -369,7 +379,8 @@ _443._tcp.www.example.com. IN TLSA (
             RecordType::TLSA,
             false,
             SupportedAlgorithms::new(),
-        ).iter()
+        )
+        .iter()
         .next()
         .cloned()
         .expect("tlsa record not found");
