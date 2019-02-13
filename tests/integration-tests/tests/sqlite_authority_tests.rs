@@ -30,7 +30,7 @@ fn test_search() {
     query.set_name(origin.clone().into());
     let query = LowerQuery::from(query);
 
-    let result = example.search(&query, false, SupportedAlgorithms::new());
+    let result = example.search(&query, false, SupportedAlgorithms::new()).unwrap();
     if !result.is_empty() {
         let record = result.iter().next().unwrap();
         assert_eq!(record.rr_type(), RecordType::A);
@@ -51,7 +51,7 @@ fn test_search_www() {
     query.set_name(www_name.clone());
     let query = LowerQuery::from(query);
 
-    let result = example.search(&query, false, SupportedAlgorithms::new());
+    let result = example.search(&query, false, SupportedAlgorithms::new()).unwrap();
     if !result.is_empty() {
         let record = result.iter().next().unwrap();
         assert_eq!(record.rr_type(), RecordType::A);
@@ -67,7 +67,7 @@ fn test_authority() {
     let authority: SqliteAuthority = create_example();
 
     assert_eq!(
-        authority.soa().iter().next().unwrap().dns_class(),
+        authority.soa().unwrap().iter().next().unwrap().dns_class(),
         DNSClass::IN
     );
 
@@ -78,10 +78,12 @@ fn test_authority() {
             false,
             SupportedAlgorithms::new()
         )
+        .unwrap()
         .was_empty());
 
     let mut lookup: Vec<_> = authority
         .ns(false, SupportedAlgorithms::new())
+        .unwrap()
         .iter()
         .cloned()
         .collect();
@@ -115,6 +117,7 @@ fn test_authority() {
             false,
             SupportedAlgorithms::new()
         )
+        .unwrap()
         .was_empty());
 
     let mut lookup: Vec<_> = authority
@@ -124,6 +127,7 @@ fn test_authority() {
             false,
             SupportedAlgorithms::new(),
         )
+        .unwrap()
         .iter()
         .cloned()
         .collect();
@@ -152,6 +156,7 @@ fn test_authority() {
                 false,
                 SupportedAlgorithms::new()
             )
+            .unwrap()
             .iter()
             .next()
             .unwrap(),
@@ -590,6 +595,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new(),
             )
+            .unwrap()
             .iter()
             .cloned()
             .collect();
@@ -605,6 +611,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new()
             )
+            .unwrap()
             .was_empty());
     }
 
@@ -628,6 +635,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new()
             )
+            .unwrap()
             .iter()
             .collect::<Vec<_>>(),
         add_record.iter().collect::<Vec<&Record>>()
@@ -654,6 +662,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new(),
             )
+            .unwrap()
             .iter()
             .cloned()
             .collect();
@@ -695,6 +704,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new()
             )
+            .unwrap()
             .was_empty());
     }
 
@@ -718,6 +728,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new(),
             )
+            .unwrap()
             .iter()
             .cloned()
             .collect();
@@ -767,6 +778,7 @@ fn test_update() {
                 false,
                 SupportedAlgorithms::new(),
             )
+            .unwrap()
             .iter()
             .cloned()
             .collect();
@@ -795,6 +807,7 @@ fn test_update() {
             false,
             SupportedAlgorithms::new()
         )
+        .unwrap()
         .was_empty());
     assert_eq!(serial + 6, authority.serial());
 }
@@ -809,7 +822,7 @@ fn test_zone_signing() {
         RecordType::AXFR,
         true,
         SupportedAlgorithms::all(),
-    );
+    ).unwrap();
 
     assert!(
         results
@@ -823,7 +836,7 @@ fn test_zone_signing() {
         RecordType::AXFR,
         true,
         SupportedAlgorithms::all(),
-    );
+    ).unwrap();
 
     for record in &results {
         if record.rr_type() == RecordType::DNSSEC(DNSSECRecordType::RRSIG) {
@@ -838,7 +851,7 @@ fn test_zone_signing() {
             RecordType::AXFR,
             true,
             SupportedAlgorithms::all(),
-        );
+        ).unwrap();
 
         // validate all records have associated RRSIGs after signing
         assert!(
@@ -863,7 +876,7 @@ fn test_get_nsec() {
     let authority: SqliteAuthority = create_secure_example();
     let lower_name = LowerName::from(name.clone());
 
-    let results = authority.get_nsec_records(&lower_name, true, SupportedAlgorithms::all());
+    let results = authority.get_nsec_records(&lower_name, true, SupportedAlgorithms::all()).unwrap();
 
     for record in &results {
         assert!(*record.name() < name);
@@ -904,6 +917,7 @@ fn test_journal() {
             false,
             SupportedAlgorithms::new(),
         )
+        .unwrap()
         .iter()
         .cloned()
         .collect();
@@ -915,7 +929,7 @@ fn test_journal() {
         RecordType::A,
         false,
         SupportedAlgorithms::new(),
-    );
+    ).unwrap();
     assert!(delete_rrset.was_empty());
 
     // that record should have been recorded... let's reload the journal and see if we get it.
@@ -939,6 +953,7 @@ fn test_journal() {
             false,
             SupportedAlgorithms::new(),
         )
+        .unwrap()
         .iter()
         .cloned()
         .collect();
@@ -949,7 +964,7 @@ fn test_journal() {
         RecordType::A,
         false,
         SupportedAlgorithms::new(),
-    );
+    ).unwrap();
     assert!(delete_rrset.was_empty());
 }
 
@@ -985,8 +1000,9 @@ fn test_recovery() {
     );
     assert!(recovered_authority
         .soa()
+        .unwrap()
         .iter()
-        .zip(authority.soa().iter())
+        .zip(authority.soa().unwrap().iter())
         .all(|(r1, r2)| r1 == r2));
     assert!(recovered_authority
         .records()
@@ -1031,10 +1047,9 @@ fn test_axfr() {
         Name::from_str("example.com.").unwrap(),
         RecordType::AXFR,
     ));
-    let result = authority.search(&query, false, SupportedAlgorithms::new());
+    let result = authority.search(&query, false, SupportedAlgorithms::new()).unwrap();
 
     // just update this if the count goes up in the authority
-    assert!(!result.is_refused());
     assert_eq!(result.iter().count(), 10);
 }
 
@@ -1050,6 +1065,5 @@ fn test_refused_axfr() {
     let result = authority.search(&query, false, SupportedAlgorithms::new());
 
     // just update this if the count goes up in the authority
-    assert!(result.is_refused());
-    assert_eq!(result.iter().count(), 0);
+    assert!(result.unwrap_err().is_refused());
 }

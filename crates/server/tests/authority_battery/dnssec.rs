@@ -12,7 +12,7 @@ use trust_dns_server::authority::Authority;
 pub fn test_a_lookup<A: Authority<Lookup = AuthLookup>>(authority: A, keys: &[DNSKEY]) {
     let query = Query::query(Name::from_str("www.example.com.").unwrap(), RecordType::A);
 
-    let lookup = authority.search(&query.into(), true, SupportedAlgorithms::new());
+    let lookup = authority.search(&query.into(), true, SupportedAlgorithms::new()).unwrap();
 
     let (a_records, other_records): (Vec<_>, Vec<_>) = lookup
         .into_iter()
@@ -29,7 +29,7 @@ pub fn test_a_lookup<A: Authority<Lookup = AuthLookup>>(authority: A, keys: &[DN
 
 #[allow(clippy::unreadable_literal)]
 pub fn test_soa<A: Authority<Lookup = AuthLookup>>(authority: A, keys: &[DNSKEY]) {
-    let lookup = authority.soa_secure(true, SupportedAlgorithms::new());
+    let lookup = authority.soa_secure(true, SupportedAlgorithms::new()).unwrap();
 
     let (soa_records, other_records): (Vec<_>, Vec<_>) = lookup
         .into_iter()
@@ -57,7 +57,7 @@ pub fn test_soa<A: Authority<Lookup = AuthLookup>>(authority: A, keys: &[DNSKEY]
 }
 
 pub fn test_ns<A: Authority<Lookup = AuthLookup>>(authority: A, keys: &[DNSKEY]) {
-    let lookup = authority.ns(true, SupportedAlgorithms::new());
+    let lookup = authority.ns(true, SupportedAlgorithms::new()).unwrap();
 
     let (ns_records, other_records): (Vec<_>, Vec<_>) = lookup
         .into_iter()
@@ -183,7 +183,7 @@ pub fn test_rfc_6975_supported_algorithms<A: Authority<Lookup = AuthLookup>>(
             &query.into(),
             true,
             SupportedAlgorithms::from(key.algorithm()),
-        );
+        ).unwrap();
 
         let (a_records, other_records): (Vec<_>, Vec<_>) = lookup
             .into_iter()

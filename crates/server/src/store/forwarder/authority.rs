@@ -14,7 +14,7 @@ use trust_dns::rr::{LowerName, Name, Record, RecordType};
 use trust_dns_resolver::lookup::Lookup as ResolverLookup;
 use trust_dns_resolver::Resolver;
 
-use authority::{Authority, LookupObject, MessageRequest, UpdateResult, ZoneType};
+use authority::{Authority, LookupObject, LookupResult, MessageRequest, UpdateResult, ZoneType};
 
 pub struct ForwardAuthority {
     origin: LowerName,
@@ -65,15 +65,15 @@ impl Authority for ForwardAuthority {
         rtype: RecordType,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup {
+    ) -> LookupResult<Self::Lookup> {
         // FIXME: make this an error
         assert!(self.origin.zone_of(name));
 
-        ForwardLookup(
+        Ok(ForwardLookup(
             self.resolver
                 .lookup(&Borrow::<Name>::borrow(name).to_utf8(), rtype)
                 .unwrap(),
-        )
+        ))
     }
 
     fn search(
@@ -81,7 +81,7 @@ impl Authority for ForwardAuthority {
         query: &LowerQuery,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup {
+    ) -> LookupResult<Self::Lookup> {
         self.lookup(
             query.name(),
             query.query_type(),
@@ -95,16 +95,8 @@ impl Authority for ForwardAuthority {
         _name: &LowerName,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup {
+    ) -> LookupResult<Self::Lookup> {
         unimplemented!()
-    }
-
-    fn add_zone_signing_key(&mut self, _signer: Signer) -> DnsSecResult<()> {
-        Err("DNSSEC zone signing not supported in Forwarder".into())
-    }
-
-    fn secure_zone(&mut self) -> DnsSecResult<()> {
-        Err("DNSSEC zone signing not supported in Forwarder".into())
     }
 }
 
@@ -113,20 +105,6 @@ pub struct ForwardLookup(ResolverLookup);
 impl LookupObject for ForwardLookup {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-
-    // FIXME: this requires some thought... if the lookup was a non-error, but is empty.
-    fn is_name_exists(&self) -> bool {
-        false
-    }
-
-    // FIXME: this probably is an error?
-    fn is_nx_domain(&self) -> bool {
-        false
-    }
-
-    fn is_refused(&self) -> bool {
-        false
     }
 
     fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {

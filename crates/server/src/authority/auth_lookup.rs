@@ -24,12 +24,8 @@ use trust_dns::rr::LowerName;
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum AuthLookup {
-    /// There is no matching name for the query
-    NxDomain,
-    /// There are no matching records for the query, but there are others associated to the name
-    NameExists,
-    /// The request was refused, eg AXFR is not supported
-    Refused,
+    /// No records
+    Empty,
     // TODO: change the result of a lookup to a set of chained iterators...
     /// Records
     Records(LookupRecords),
@@ -49,10 +45,8 @@ pub enum AuthLookup {
 impl AuthLookup {
     /// Returns true if either the associated Records are empty, or this is a NameExists or NxDomain
     pub fn is_empty(&self) -> bool {
-        match *self {
-            AuthLookup::NameExists | AuthLookup::NxDomain | AuthLookup::Refused => true,
-            AuthLookup::Records(_) | AuthLookup::SOA(_) | AuthLookup::AXFR { .. } => false,
-        }
+        // FIXME: this needs to be cheap
+        self.was_empty()
     }
 
     /// This is an NxDomain or NameExists, and has no associated records
@@ -105,18 +99,6 @@ impl LookupObject for AuthLookup {
         AuthLookup::is_empty(self)
     }
 
-    fn is_name_exists(&self) -> bool {
-        AuthLookup::is_name_exists(self)
-    }
-
-    fn is_nx_domain(&self) -> bool {
-        AuthLookup::is_nx_domain(self)
-    }
-
-    fn is_refused(&self) -> bool {
-        AuthLookup::is_refused(self)
-    }
-
     fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {
         let boxed_iter = AuthLookup::iter(self);
         Box::new(boxed_iter)
@@ -125,7 +107,7 @@ impl LookupObject for AuthLookup {
 
 impl Default for AuthLookup {
     fn default() -> Self {
-        AuthLookup::NxDomain
+        AuthLookup::Empty
     }
 }
 
@@ -135,9 +117,7 @@ impl<'a> IntoIterator for &'a AuthLookup {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            AuthLookup::NxDomain | AuthLookup::NameExists | AuthLookup::Refused => {
-                AuthLookupIter::Empty
-            }
+            AuthLookup::Empty => AuthLookupIter::Empty,
             AuthLookup::Records(r) | AuthLookup::SOA(r) => AuthLookupIter::Records(r.into_iter()),
             AuthLookup::AXFR {
                 start_soa,
@@ -301,10 +281,7 @@ impl<'r> Iterator for AnyRecordsIter<'r> {
 /// The result of a lookup
 #[derive(Debug)]
 pub enum LookupRecords {
-    /// There is no record by the name
-    NxDomain,
-    /// There is no record for the given query, but there are other records at that name
-    NameExists,
+    Empty,
     /// The associate records
     Records {
         /// was the search a secure search
@@ -351,22 +328,6 @@ impl LookupRecords {
         self.iter().count() == 0
     }
 
-    /// This is an NxDomain
-    pub fn is_nx_domain(&self) -> bool {
-        match *self {
-            LookupRecords::NxDomain => true,
-            _ => false,
-        }
-    }
-
-    /// This is a NameExists
-    pub fn is_name_exists(&self) -> bool {
-        match *self {
-            LookupRecords::NameExists => true,
-            _ => false,
-        }
-    }
-
     /// Conversion to an iterator
     pub fn iter(&self) -> LookupRecordsIter {
         self.into_iter()
@@ -375,7 +336,7 @@ impl LookupRecords {
 
 impl Default for LookupRecords {
     fn default() -> Self {
-        LookupRecords::NxDomain
+        LookupRecords::Empty
     }
 }
 
@@ -385,7 +346,7 @@ impl<'a> IntoIterator for &'a LookupRecords {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            LookupRecords::NxDomain | LookupRecords::NameExists => LookupRecordsIter::Empty,
+            LookupRecords::Empty => LookupRecordsIter::Empty,
             LookupRecords::Records {
                 is_secure,
                 supported_algorithms,

@@ -12,7 +12,7 @@ use trust_dns::proto::rr::dnssec::rdata::key::KEY;
 use trust_dns::rr::dnssec::{DnsSecError, DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{LowerName, Name, RecordType};
 
-use authority::{MessageRequest, UpdateResult, ZoneType};
+use authority::{LookupResult, MessageRequest, UpdateResult, ZoneType};
 
 /// Authority implementations can be used with a `Catalog`
 pub trait Authority: Send {
@@ -51,7 +51,7 @@ pub trait Authority: Send {
         rtype: RecordType,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup;
+    ) -> LookupResult<Self::Lookup>;
 
     /// Using the specified query, perform a lookup against this zone.
     ///
@@ -69,10 +69,10 @@ pub trait Authority: Send {
         query: &LowerQuery,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup;
+    ) -> LookupResult<Self::Lookup>;
 
     /// Get the NS, NameServer, record for the zone
-    fn ns(&self, is_secure: bool, supported_algorithms: SupportedAlgorithms) -> Self::Lookup {
+    fn ns(&self, is_secure: bool, supported_algorithms: SupportedAlgorithms) -> LookupResult<Self::Lookup> {
         self.lookup(
             self.origin(),
             RecordType::NS,
@@ -93,13 +93,13 @@ pub trait Authority: Send {
         name: &LowerName,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup;
+    ) -> LookupResult<Self::Lookup>;
 
     /// Returns the SOA of the authority.
     ///
     /// *Note*: This will only return the SOA, if this is fullfilling a request, a standard lookup
     ///  should be used, see `soa_secure()`, which will optionally return RRSIGs.
-    fn soa(&self) -> Self::Lookup {
+    fn soa(&self) -> LookupResult<Self::Lookup> {
         // SOA should be origin|SOA
         self.lookup(
             self.origin(),
@@ -114,7 +114,7 @@ pub trait Authority: Send {
         &self,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Self::Lookup {
+    ) -> LookupResult<Self::Lookup> {
         self.lookup(
             self.origin(),
             RecordType::SOA,

@@ -19,7 +19,7 @@ fn test_lookup() {
         RecordType::A,
         false,
         Default::default(),
-    );
+    ).unwrap();
 
     let address = lookup.iter().next().expect("no addresses returned!");
     let address = address.rdata().as_a().expect("not an A record");

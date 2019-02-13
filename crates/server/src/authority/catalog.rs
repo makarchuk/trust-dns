@@ -27,7 +27,7 @@ use trust_dns::rr::rdata::opt::{EdnsCode, EdnsOption};
 use trust_dns::rr::{LowerName, RecordType};
 
 use authority::{AuthLookup, MessageRequest, MessageResponse, MessageResponseBuilder, ZoneType};
-use authority::{AuthorityObject, LookupObject};
+use authority::{AuthorityObject, LookupError, LookupObject, LookupResult};
 
 /// Set of authorities, zones, available to this server.
 #[derive(Default)]
@@ -381,33 +381,46 @@ impl Catalog {
                     );
                 }
 
-                let records: Box<dyn LookupObject> =
+                let records: LookupResult<Box<dyn LookupObject>> =
                     authority.search(query, is_dnssec, supported_algorithms);
 
                 // setup headers
                 //  and add records
-                let (ns, soa): (Box<dyn LookupObject>, Box<dyn LookupObject>) =
-                    if !records.is_empty() {
+                match records {
+                    Ok(records) => {
                         response_header.set_response_code(ResponseCode::NoError);
                         response_header.set_authoritative(true);
                         // get the NS records
-                        let ns = authority.ns(is_dnssec, supported_algorithms);
-                        // chain here to match type below...
-                        (ns, Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>)
-                    } else if records.is_refused() {
+                        // FIXME: just ignore NS errors?
+                        let ns = authority.ns(is_dnssec, supported_algorithms).unwrap_or_else(|_| Box::new(AuthLookup::default()) as Box<dyn LookupObject>);
+                        let soa = Box::new(AuthLookup::default()) as Box<dyn LookupObject>;
+
+                        return send_response(
+                            response_edns,
+                            response.build(response_header, records.iter(), ns.iter(), soa.iter()),
+                            response_handle,
+                        );
+                    }
+                    Err(LookupError::ResponseCode(ResponseCode::Refused)) => {
                         response_header.set_response_code(ResponseCode::Refused);
 
-                        (
-                            Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>,
-                            Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>,
-                        )
-                    } else {
+                        let ns = Box::new(AuthLookup::default()) as Box<dyn LookupObject>;
+                        let soa = Box::new(AuthLookup::default()) as Box<dyn LookupObject>;
+                        let records = Box::new(AuthLookup::default()) as Box<dyn LookupObject>;
+
+                        return send_response(
+                            response_edns,
+                            response.build(response_header, records.iter(), ns.iter(), soa.iter()),
+                            response_handle,
+                        );
+                    }
+                    Err(e) => {
                         // in the not found case it's standard to return the SOA in the authority section
                         //   if the name is in this zone, etc.
                         // see https://tools.ietf.org/html/rfc2308 for proper response construct
-                        if records.is_nx_domain() {
+                        if e.is_nx_domain() {
                             response_header.set_response_code(ResponseCode::NXDomain);
-                        } else if records.is_name_exists() {
+                        } else if e.is_name_exists() {
                             response_header.set_response_code(ResponseCode::NoError);
                         };
 
@@ -418,25 +431,26 @@ impl Catalog {
                                 query.name(),
                                 is_dnssec,
                                 supported_algorithms,
-                            );
+                            ).unwrap_or_else(|_| Box::new(AuthLookup::default()) as Box<dyn LookupObject>);
                             debug!("request: {} non-existent adding nsecs", request.id(),);
 
                             nsecs
                         } else {
                             // place holder...
                             debug!("request: {} non-existent", request.id());
-                            Box::new(AuthLookup::NxDomain) as Box<dyn LookupObject>
+                            Box::new(AuthLookup::default()) as Box<dyn LookupObject>
                         };
 
-                        let soa = authority.soa_secure(is_dnssec, supported_algorithms);
-                        (ns, soa)
-                    };
+                        let soa = authority.soa_secure(is_dnssec, supported_algorithms).unwrap_or_else(|_| Box::new(AuthLookup::default()) as Box<dyn LookupObject>);
+                        let records = Box::new(AuthLookup::default()) as Box<dyn LookupObject>;
 
-                return send_response(
-                    response_edns,
-                    response.build(response_header, records.iter(), soa.iter(), ns.iter()),
-                    response_handle,
-                );
+                        return send_response(
+                            response_edns,
+                            response.build(response_header, records.iter(), ns.iter(), soa.iter()),
+                            response_handle,
+                        );
+                    }
+                }
             }
         }
 

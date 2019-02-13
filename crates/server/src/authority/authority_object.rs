@@ -16,7 +16,6 @@ use authority::result::LookupResult;
 use authority::LookupObject;
 use authority::{Authority, MessageRequest, UpdateResult, ZoneType};
 
-// FIXME: change all these to return LookupResult
 /// An Object safe Authority
 pub trait AuthorityObject: Send {
     /// What type is this zone
@@ -51,7 +50,7 @@ pub trait AuthorityObject: Send {
         rtype: RecordType,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject>;
+    ) -> LookupResult<Box<dyn LookupObject>>;
 
     /// Using the specified query, perform a lookup against this zone.
     ///
@@ -69,14 +68,14 @@ pub trait AuthorityObject: Send {
         query: &LowerQuery,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject>;
+    ) -> LookupResult<Box<dyn LookupObject>>;
 
     /// Get the NS, NameServer, record for the zone
     fn ns(
         &self,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject> {
+    ) -> LookupResult<Box<dyn LookupObject>> {
         self.lookup(
             self.origin(),
             RecordType::NS,
@@ -97,13 +96,13 @@ pub trait AuthorityObject: Send {
         name: &LowerName,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject>;
+    ) -> LookupResult<Box<dyn LookupObject>>;
 
     /// Returns the SOA of the authority.
     ///
     /// *Note*: This will only return the SOA, if this is fullfilling a request, a standard lookup
     ///  should be used, see `soa_secure()`, which will optionally return RRSIGs.
-    fn soa(&self) -> Box<dyn LookupObject> {
+    fn soa(&self) -> LookupResult<Box<dyn LookupObject>> {
         // SOA should be origin|SOA
         self.lookup(
             self.origin(),
@@ -118,7 +117,7 @@ pub trait AuthorityObject: Send {
         &self,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject> {
+    ) -> LookupResult<Box<dyn LookupObject>> {
         self.lookup(
             self.origin(),
             RecordType::SOA,
@@ -195,9 +194,9 @@ where
         rtype: RecordType,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject> {
+    ) -> LookupResult<Box<dyn LookupObject>> {
         let lookup = Authority::lookup(self, name, rtype, is_secure, supported_algorithms);
-        Box::new(lookup)
+        lookup.map(|l| Box::new(l) as Box<dyn LookupObject>)
     }
 
     /// Using the specified query, perform a lookup against this zone.
@@ -216,9 +215,9 @@ where
         query: &LowerQuery,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject> {
+    ) -> LookupResult<Box<dyn LookupObject>> {
         let lookup = Authority::search(self, query, is_secure, supported_algorithms);
-        Box::new(lookup)
+        lookup.map(|l| Box::new(l) as Box<dyn LookupObject>)
     }
 
     /// Return the NSEC records based on the given name
@@ -233,9 +232,9 @@ where
         name: &LowerName,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> Box<dyn LookupObject> {
+    ) -> LookupResult<Box<dyn LookupObject>> {
         let lookup = Authority::get_nsec_records(self, name, is_secure, supported_algorithms);
-        Box::new(lookup)
+        lookup.map(|l| Box::new(l) as Box<dyn LookupObject>)
     }
 
     fn add_update_auth_key(&mut self, name: Name, key: KEY) -> DnsSecResult<()> {
