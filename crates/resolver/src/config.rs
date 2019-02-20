@@ -10,6 +10,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+#[cfg(feature = "serde-config")]
+use serde::Deserializer;
+
 use proto::rr::Name;
 
 /// Configuration for the upstream nameservers to use for resolution
@@ -241,11 +244,21 @@ impl Protocol {
     }
 }
 
+// #[cfg(feature = "serde-config")]
+// fn deserialize_socket_addr<'de, D>(deserializer: D) -> Result<SocketAddr, D::Error> where D: Deserializer<'de> {
+//     use serde::Deserialize;
+
+//     let ip_str: &str = Deserialize::deserialize(deserializer)?;
+//     let ip = IpAddr::from_str(ip_str)?;
+//     deserializer.deserialize_str()
+// }
+
 /// Configuration for the NameServer
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde-config", derive(Serialize, Deserialize))]
 pub struct NameServerConfig {
     /// The address which the DNS NameServer is registered at.
+//    #[cfg_attr(feature = "serde-config", serde(deserialize_with = "deserialize_socket_addr"))]
     pub socket_addr: SocketAddr,
     /// The protocol to use when communicating with the NameServer.
     pub protocol: Protocol,

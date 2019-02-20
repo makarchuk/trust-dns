@@ -6,29 +6,65 @@
 // copied, modified, or distributed except according to those terms.
 
 use std::borrow::Borrow;
+use std::sync::Mutex;
+
+use futures::Future;
 
 use trust_dns::op::LowerQuery;
 use trust_dns::op::ResponseCode;
 use trust_dns::rr::dnssec::{DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{LowerName, Name, Record, RecordType};
 use trust_dns_resolver::lookup::Lookup as ResolverLookup;
-use trust_dns_resolver::Resolver;
+use trust_dns_resolver::AsyncResolver;
+use trust_dns_resolver::config::ResolverConfig;
 
 use authority::{Authority, LookupObject, LookupResult, MessageRequest, UpdateResult, ZoneType};
+use store::forwarder::ForwardConfig;
 
 pub struct ForwardAuthority {
     origin: LowerName,
-    /// FIXME: need to change Authority to be Async
-    resolver: Resolver,
+    resolver: AsyncResolver,
 }
 
 impl ForwardAuthority {
-    // FIXME: read from configuration
+    // // FIXME: drop this?
     pub fn new() -> Self {
+        // FIXME: error here
+        let (resolver, bg) = AsyncResolver::from_system_conf().unwrap();
+        let bg = Box::new(bg);
+
         ForwardAuthority {
             origin: Name::root().into(),
-            resolver: Resolver::from_system_conf().unwrap(),
+            resolver: resolver,
         }
+    }
+
+    /// Read the Authority for the origin from the specified configuration
+    pub fn try_from_config(
+        origin: Name,
+        zone_type: ZoneType,
+        config: &ForwardConfig,
+    ) -> Result<(Self, impl Future<Item = (), Error = ()>), String> {
+        use std::fs::File;
+        use std::io::Read;
+
+        info!("loading forwarder config: {}", origin);
+
+        let name_servers = config.name_servers.clone();
+        let options = config.options.clone().unwrap_or_default();
+        let config = ResolverConfig::from_parts(None, vec![], name_servers);
+
+        let (resolver, bg) = AsyncResolver::new(config, options);
+
+        info!(
+            "forward resolver configured: {}: ",
+            origin
+        );
+
+        Ok((ForwardAuthority {
+            origin: origin.into(),
+            resolver,
+        }, bg))
     }
 }
 
@@ -66,12 +102,18 @@ impl Authority for ForwardAuthority {
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
     ) -> LookupResult<Self::Lookup> {
+        use futures::future::Executor;
+        use tokio_executor::DefaultExecutor;
+
         // FIXME: make this an error
         assert!(self.origin.zone_of(name));
 
+        info!("forwarding lookup: {} {}", name, rtype);
         Ok(ForwardLookup(
             self.resolver
-                .lookup(&Borrow::<Name>::borrow(name).to_utf8(), rtype)
+                .lookup(name, rtype)
+                // FIXME: need to make this return a Future...
+                .wait()
                 .unwrap(),
         ))
     }

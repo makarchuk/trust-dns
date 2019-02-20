@@ -451,6 +451,12 @@ impl Catalog {
                         );
                     }
                 }
+            } else {
+                info!(
+                    "request: {} authority not found: {}",
+                    request.id(),
+                    query.name(),
+                );
             }
         }
 
@@ -464,9 +470,10 @@ impl Catalog {
 
     /// Recursively searches the catalog for a matching authority
     pub fn find(&self, name: &LowerName) -> Option<&RwLock<Box<dyn AuthorityObject>>> {
+        debug!("searching authorities for: {}", name);
         self.authorities.get(name).or_else(|| {
-            let name = name.base_name();
             if !name.is_root() {
+                let name = name.base_name();
                 self.find(&name)
             } else {
                 None

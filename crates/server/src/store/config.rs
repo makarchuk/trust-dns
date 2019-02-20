@@ -9,6 +9,7 @@
 
 use store::file::FileConfig;
 use store::sqlite::SqliteConfig;
+use store::forwarder::ForwardConfig;
 
 /// Enumeration over all Store configurations
 #[derive(Deserialize, PartialEq, Debug)]
@@ -19,4 +20,6 @@ pub enum StoreConfig {
     File(FileConfig),
     /// Sqlite based configuration file
     Sqlite(SqliteConfig),
+    /// Forwarder, aka Resolver
+    Forward(ForwardConfig),
 }

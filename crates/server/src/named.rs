@@ -31,6 +31,7 @@ extern crate log;
 #[cfg(feature = "dns-over-rustls")]
 extern crate rustls;
 extern crate tokio;
+extern crate tokio_executor;
 extern crate tokio_tcp;
 extern crate tokio_udp;
 extern crate trust_dns;
@@ -46,9 +47,10 @@ use std::path::Path;
 
 use clap::{Arg, ArgMatches};
 use futures::{future, Future};
-use tokio::runtime::current_thread::Runtime;
+use tokio::runtime::Runtime;
 use tokio_tcp::TcpListener;
 use tokio_udp::UdpSocket;
+use tokio::runtime::TaskExecutor;
 
 use trust_dns::rr::Name;
 #[cfg(feature = "dnssec")]
@@ -68,6 +70,7 @@ use trust_dns_server::store::StoreConfig;
 fn load_zone(
     zone_dir: &Path,
     zone_config: &ZoneConfig,
+    executor: &TaskExecutor,
 ) -> Result<Box<dyn AuthorityObject>, String> {
     use std::path::PathBuf;
 
@@ -113,6 +116,19 @@ fn load_zone(
                 config,
             )
             .map(Box::new)?
+        }
+        Some(StoreConfig::Forward(ref config)) => {
+            use futures::future::Executor;
+
+            let (forwarder, bg) = ForwardAuthority::try_from_config(
+                zone_name,
+                zone_type,
+                config,
+            )?;
+            
+            executor.execute(bg).expect("failed to background forwarder");
+
+            Box::new(forwarder)
         }
         None if zone_config.is_update_allowed() => {
             warn!(
@@ -345,6 +361,8 @@ pub fn main() {
         .map(Path::new)
         .unwrap_or_else(|| &directory_config);
 
+    let mut io_loop = Runtime::new().expect("error when creating tokio Runtime");
+    let executor = io_loop.executor();
     let mut catalog: Catalog = Catalog::new();
     // configure our server based on the config_path
     for zone in config.get_zones() {
@@ -352,14 +370,11 @@ pub fn main() {
             .get_zone()
             .unwrap_or_else(|_| panic!("bad zone name in {:?}", config_path));
 
-        match load_zone(zone_dir, zone) {
+        match load_zone(zone_dir, zone, &executor) {
             Ok(authority) => catalog.upsert(zone_name.into(), authority),
             Err(error) => panic!("could not load zone {}: {}", zone_name, error),
         }
     }
-
-    // FIXME: need a configuration for Forwarders
-    catalog.upsert(Name::root().into(), Box::new(ForwardAuthority::new()));
 
     // TODO: support all the IPs asked to listen on...
     // TODO:, there should be the option to listen on any port, IP and protocol option...
@@ -388,8 +403,6 @@ pub fn main() {
         .iter()
         .map(|x| TcpListener::bind(x).unwrap_or_else(|_| panic!("could not bind to tcp: {}", x)))
         .collect();
-
-    let mut io_loop = Runtime::new().expect("error when creating tokio Runtime");
 
     // now, run the server, based on the config
     #[cfg_attr(not(feature = "dns-over-tls"), allow(unused_mut))]

@@ -6,6 +6,7 @@
 // copied, modified, or distributed except according to those terms.
 
 extern crate chrono;
+extern crate env_logger;
 extern crate futures;
 #[macro_use]
 extern crate log;
@@ -242,6 +243,29 @@ fn test_server_continues_on_bad_data_tcp() {
 
         io_loop.spawn(bg);
 
+        query_a(&mut io_loop, &mut client);
+    })
+}
+
+#[test]
+fn test_forward() {
+    env_logger::init();
+    
+    named_test_harness("example_forwarder.toml", |port, _, _| {
+        let mut io_loop = Runtime::new().unwrap();
+        let addr: SocketAddr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), port);
+        let (stream, sender) = TcpClientStream::new(addr);
+        let (bg, mut client) = ClientFuture::new(Box::new(stream), sender, None);
+
+        io_loop.spawn(bg);
+        query_a(&mut io_loop, &mut client);
+
+        // just tests that multiple queries work
+        let addr: SocketAddr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), port);
+        let (stream, sender) = TcpClientStream::new(addr);
+        let (bg, mut client) = ClientFuture::new(Box::new(stream), sender, None);
+
+        io_loop.spawn(bg);
         query_a(&mut io_loop, &mut client);
     })
 }

@@ -252,6 +252,12 @@ impl From<LowerName> for Name {
     }
 }
 
+impl<'a> From<&'a LowerName> for Name {
+    fn from(name: &'a LowerName) -> Self {
+        name.0.clone()
+    }
+}
+
 impl Borrow<Name> for LowerName {
     fn borrow(&self) -> &Name {
         &self.0

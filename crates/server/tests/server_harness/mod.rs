@@ -56,7 +56,7 @@ where
         .stdout(Stdio::piped())
         .env(
             "RUST_LOG",
-            "ht=trace,trust_dns_https=debug,trust_dns_proto=debug",
+            "trust_dns=debug,trust_dns_https=debug,trust_dns_proto=debug,trust_dns_resolver=debug,trust_dns_server=debug",
         ).arg("-d")
         .arg(&format!(
             "--config={}/tests/named_test_configs/{}",
