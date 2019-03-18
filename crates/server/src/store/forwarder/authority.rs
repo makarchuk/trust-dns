@@ -8,19 +8,22 @@
 use std::borrow::Borrow;
 use std::sync::Mutex;
 
-use futures::Future;
+use futures::{future::FutureResult, Async, Future, Poll};
 
 use trust_dns::op::LowerQuery;
 use trust_dns::op::ResponseCode;
 use trust_dns::rr::dnssec::{DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{LowerName, Name, Record, RecordType};
-use trust_dns_resolver::lookup::Lookup as ResolverLookup;
-use trust_dns_resolver::AsyncResolver;
 use trust_dns_resolver::config::ResolverConfig;
+use trust_dns_resolver::lookup::Lookup as ResolverLookup;
+use trust_dns_resolver::{AsyncResolver, BackgroundLookup};
 
-use authority::{Authority, LookupObject, LookupResult, MessageRequest, UpdateResult, ZoneType};
+use authority::{Authority, LookupError, LookupObject, MessageRequest, UpdateResult, ZoneType};
 use store::forwarder::ForwardConfig;
 
+/// An authority that will forward resolutions to upstream resolvers.
+///
+/// This uses the trust-dns-resolver for resolving requests.
 pub struct ForwardAuthority {
     origin: LowerName,
     resolver: AsyncResolver,
@@ -56,20 +59,21 @@ impl ForwardAuthority {
 
         let (resolver, bg) = AsyncResolver::new(config, options);
 
-        info!(
-            "forward resolver configured: {}: ",
-            origin
-        );
+        info!("forward resolver configured: {}: ", origin);
 
-        Ok((ForwardAuthority {
-            origin: origin.into(),
-            resolver,
-        }, bg))
+        Ok((
+            ForwardAuthority {
+                origin: origin.into(),
+                resolver,
+            },
+            bg,
+        ))
     }
 }
 
 impl Authority for ForwardAuthority {
     type Lookup = ForwardLookup;
+    type LookupFuture = ForwardLookupFuture;
 
     /// Always Forward
     fn zone_type(&self) -> ZoneType {
@@ -101,7 +105,7 @@ impl Authority for ForwardAuthority {
         rtype: RecordType,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> LookupResult<Self::Lookup> {
+    ) -> Self::LookupFuture {
         use futures::future::Executor;
         use tokio_executor::DefaultExecutor;
 
@@ -109,13 +113,7 @@ impl Authority for ForwardAuthority {
         assert!(self.origin.zone_of(name));
 
         info!("forwarding lookup: {} {}", name, rtype);
-        Ok(ForwardLookup(
-            self.resolver
-                .lookup(name, rtype)
-                // FIXME: need to make this return a Future...
-                .wait()
-                .unwrap(),
-        ))
+        ForwardLookupFuture(self.resolver.lookup(name, rtype))
     }
 
     fn search(
@@ -123,13 +121,13 @@ impl Authority for ForwardAuthority {
         query: &LowerQuery,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> LookupResult<Self::Lookup> {
-        self.lookup(
+    ) -> Box<Future<Item = Self::Lookup, Error = LookupError> + Send> {
+        Box::new(self.lookup(
             query.name(),
             query.query_type(),
             is_secure,
             supported_algorithms,
-        )
+        ))
     }
 
     fn get_nsec_records(
@@ -137,7 +135,7 @@ impl Authority for ForwardAuthority {
         _name: &LowerName,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> LookupResult<Self::Lookup> {
+    ) -> Self::LookupFuture {
         unimplemented!()
     }
 }
@@ -151,5 +149,20 @@ impl LookupObject for ForwardLookup {
 
     fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {
         Box::new(self.0.record_iter())
+    }
+}
+
+pub struct ForwardLookupFuture(BackgroundLookup);
+
+impl Future for ForwardLookupFuture {
+    type Item = ForwardLookup;
+    type Error = LookupError;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match self.0.poll() {
+            Ok(Async::Ready(f)) => Ok(Async::Ready(ForwardLookup(f))),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(e) => Err(e.into()),
+        }
     }
 }

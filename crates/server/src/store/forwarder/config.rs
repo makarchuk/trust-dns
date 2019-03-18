@@ -10,8 +10,8 @@ use trust_dns_resolver::config::{NameServerConfigGroup, ResolverOpts};
 /// Configuration for master file based zones
 #[derive(Deserialize, PartialEq, Debug)]
 pub struct ForwardConfig {
-    // upstream name_server configurations
+    /// upstream name_server configurations
     pub name_servers: NameServerConfigGroup,
-    // Resolver options
+    /// Resolver options
     pub options: Option<ResolverOpts>,
 }

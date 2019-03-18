@@ -1533,10 +1533,7 @@ mod tests {
     #[test]
     fn test_into_name() {
         let name = Name::from_utf8("www.example.com").unwrap();
-        assert_eq!(
-            Name::from_utf8("www.example.com").unwrap(),
-            (&name).into_name().unwrap()
-        );
+        assert_eq!(Name::from_utf8("www.example.com").unwrap(), name);
         assert_eq!(
             Name::from_utf8("www.example.com").unwrap(),
             Name::from_utf8("www.example.com")

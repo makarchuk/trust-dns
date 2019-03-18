@@ -21,6 +21,7 @@
 //!    -p PORT, --port=PORT    Override the listening port
 //!    --tls-port=PORT         Override the listening port for TLS connections
 //! ```
+#![recursion_limit = "128"]
 
 extern crate chrono;
 #[macro_use]
@@ -43,22 +44,22 @@ extern crate trust_dns_server;
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::{Arg, ArgMatches};
 use futures::{future, Future};
 use tokio::runtime::Runtime;
+use tokio::runtime::TaskExecutor;
 use tokio_tcp::TcpListener;
 use tokio_udp::UdpSocket;
-use tokio::runtime::TaskExecutor;
 
-use trust_dns::rr::Name;
 #[cfg(feature = "dnssec")]
 use trust_dns::rr::rdata::key::KeyUsage;
-use trust_dns_server::authority::{Authority, AuthorityObject, Catalog, ZoneType};
-use trust_dns_server::config::{Config, ZoneConfig};
+use trust_dns::rr::Name;
+use trust_dns_server::authority::{AuthorityObject, Catalog, ZoneType};
 #[cfg(any(feature = "dns-over-tls", feature = "dnssec"))]
 use trust_dns_server::config::dnssec::{self, TlsCertConfig};
+use trust_dns_server::config::{Config, ZoneConfig};
 use trust_dns_server::logger;
 use trust_dns_server::server::ServerFuture;
 use trust_dns_server::store::file::{FileAuthority, FileConfig};
@@ -120,13 +121,11 @@ fn load_zone(
         Some(StoreConfig::Forward(ref config)) => {
             use futures::future::Executor;
 
-            let (forwarder, bg) = ForwardAuthority::try_from_config(
-                zone_name,
-                zone_type,
-                config,
-            )?;
-            
-            executor.execute(bg).expect("failed to background forwarder");
+            let (forwarder, bg) = ForwardAuthority::try_from_config(zone_name, zone_type, config)?;
+
+            executor
+                .execute(bg)
+                .expect("failed to background forwarder");
 
             Box::new(forwarder)
         }
@@ -189,17 +188,19 @@ fn load_zone(
                     key_config.is_zone_update_auth()
                 );
                 if key_config.is_zone_signing_key() {
-                    let zone_signer = key_config.try_into_signer(zone_name.clone()).map_err(|e| {
-                        format!("failed to load key: {:?} msg: {}", key_config.key_path(), e)
-                    })?;
+                    let zone_signer =
+                        key_config.try_into_signer(zone_name.clone()).map_err(|e| {
+                            format!("failed to load key: {:?} msg: {}", key_config.key_path(), e)
+                        })?;
                     authority
                         .add_zone_signing_key(zone_signer)
                         .expect("failed to add zone signing key to authority");
                 }
                 if key_config.is_zone_update_auth() {
-                    let update_auth_signer = key_config.try_into_signer(zone_name.clone()).map_err(|e| {
-                        format!("failed to load key: {:?} msg: {}", key_config.key_path(), e)
-                    })?;
+                    let update_auth_signer =
+                        key_config.try_into_signer(zone_name.clone()).map_err(|e| {
+                            format!("failed to load key: {:?} msg: {}", key_config.key_path(), e)
+                        })?;
                     let public_key = update_auth_signer
                         .key()
                         .to_sig0key_with_usage(update_auth_signer.algorithm(), KeyUsage::Host)
@@ -356,10 +357,10 @@ pub fn main() {
         .unwrap_or_else(|e| panic!("could not read config {}: {:?}", config_path.display(), e));
     let directory_config = config.get_directory().to_path_buf();
     let flag_zonedir = args.flag_zonedir.clone();
-    let zone_dir: &Path = flag_zonedir
+    let zone_dir: PathBuf = flag_zonedir
         .as_ref()
-        .map(Path::new)
-        .unwrap_or_else(|| &directory_config);
+        .map(PathBuf::from)
+        .unwrap_or_else(|| directory_config.clone());
 
     let mut io_loop = Runtime::new().expect("error when creating tokio Runtime");
     let executor = io_loop.executor();
@@ -370,7 +371,7 @@ pub fn main() {
             .get_zone()
             .unwrap_or_else(|_| panic!("bad zone name in {:?}", config_path));
 
-        match load_zone(zone_dir, zone, &executor) {
+        match load_zone(&zone_dir, zone, &executor) {
             Ok(authority) => catalog.upsert(zone_name.into(), authority),
             Err(error) => panic!("could not load zone {}: {}", zone_name, error),
         }
@@ -437,7 +438,7 @@ pub fn main() {
                     &mut server,
                     &config,
                     _tls_cert_config,
-                    zone_dir,
+                    &zone_dir,
                     &listen_addrs,
                 );
 
@@ -448,7 +449,7 @@ pub fn main() {
                     &mut server,
                     &config,
                     _tls_cert_config,
-                    zone_dir,
+                    &zone_dir,
                     &listen_addrs,
                 );
             }

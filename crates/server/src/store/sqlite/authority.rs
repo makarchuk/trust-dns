@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use futures::future::{Future, FutureResult, IntoFuture};
+
 use trust_dns::op::LowerQuery;
 use trust_dns::op::ResponseCode;
 use trust_dns::proto::rr::dnssec::rdata::key::KEY;
@@ -24,7 +26,8 @@ use trust_dns::rr::{DNSClass, LowerName, Name, RData, Record, RecordSet, RecordT
 #[cfg(feature = "dnssec")]
 use authority::UpdateRequest;
 use authority::{
-    AnyRecords, AuthLookup, Authority, LookupRecords, LookupError, LookupResult, MessageRequest, UpdateResult, ZoneType,
+    AnyRecords, AuthLookup, Authority, LookupError, LookupRecords, LookupResult, MessageRequest,
+    UpdateResult, ZoneType,
 };
 use store::sqlite::{Journal, SqliteConfig};
 
@@ -261,13 +264,11 @@ impl SqliteAuthority {
 
     /// Returns the minimum ttl (as used in the SOA record)
     pub fn minimum_ttl(&self) -> u32 {
-        let soa = match self.soa() {
+        let soa = match self.soa().wait(/*TODO: this works because the future here is always complete*/)
+        {
             Ok(soa) => soa,
             Err(e) => {
-                error!(
-                    "error finding soa record for zone: {}: {}",
-                    self.origin, e
-                );
+                error!("error finding soa record for zone: {}: {}", self.origin, e);
                 return 0;
             }
         };
@@ -283,13 +284,11 @@ impl SqliteAuthority {
 
     /// get the current serial number for the zone.
     pub fn serial(&self) -> u32 {
-        let soa = match self.soa() {
+        let soa = match self.soa().wait(/*TODO: this works because the future here is always complete*/)
+        {
             Ok(soa) => soa,
             Err(e) => {
-                error!(
-                    "error finding soa record for zone: {}: {}",
-                    self.origin, e
-                );
+                error!("error finding soa record for zone: {}: {}", self.origin, e);
                 return 0;
             }
         };
@@ -310,7 +309,8 @@ impl SqliteAuthority {
     }
 
     fn increment_soa_serial(&mut self) -> u32 {
-        let soa = match self.soa() {
+        let soa = match self.soa().wait(/*TODO: this works because the future here is always complete*/)
+        {
             Ok(soa) => soa,
             Err(e) => {
                 error!(
@@ -456,6 +456,7 @@ impl SqliteAuthority {
                                         false,
                                         SupportedAlgorithms::new(),
                                     )
+                                    .wait(/*TODO: this works because the future here is always complete*/)
                                     .unwrap_or_default()
                                     .was_empty()
                                 {
@@ -473,6 +474,7 @@ impl SqliteAuthority {
                                         false,
                                         SupportedAlgorithms::new(),
                                     )
+                                    .wait(/*TODO: this works because the future here is always complete*/)
                                     .unwrap_or_default()
                                     .was_empty()
                                 {
@@ -498,6 +500,7 @@ impl SqliteAuthority {
                                         false,
                                         SupportedAlgorithms::new(),
                                     )
+                                    .wait(/*TODO: this works because the future here is always complete*/)
                                     .unwrap_or_default()
                                     .was_empty()
                                 {
@@ -515,6 +518,7 @@ impl SqliteAuthority {
                                         false,
                                         SupportedAlgorithms::new(),
                                     )
+                                    .wait(/*TODO: this works because the future here is always complete*/)
                                     .unwrap_or_default()
                                     .was_empty()
                                 {
@@ -538,6 +542,7 @@ impl SqliteAuthority {
                             false,
                             SupportedAlgorithms::new(),
                         )
+                        .wait(/*TODO: this works because the future here is always complete*/)
                         .unwrap_or_default()
                         .iter()
                         .find(|rr| *rr == require)
@@ -618,12 +623,15 @@ impl SqliteAuthority {
                 })
                 .any(|sig| {
                     let name = LowerName::from(sig.signer_name());
-                    let keys = self.lookup(
-                        &name,
-                        RecordType::DNSSEC(DNSSECRecordType::KEY),
-                        false,
-                        SupportedAlgorithms::new(),
-                    );
+                    // TODO: updates should be async as well.
+                    let keys = self
+                        .lookup(
+                            &name,
+                            RecordType::DNSSEC(DNSSECRecordType::KEY),
+                            false,
+                            SupportedAlgorithms::new(),
+                        )
+                        .wait();
 
                     let keys = match keys {
                         Ok(keys) => keys,
@@ -1164,6 +1172,7 @@ impl SqliteAuthority {
 
 impl Authority for SqliteAuthority {
     type Lookup = AuthLookup;
+    type LookupFuture = FutureResult<Self::Lookup, LookupError>;
 
     /// What type is this zone
     fn zone_type(&self) -> ZoneType {
@@ -1273,7 +1282,7 @@ impl Authority for SqliteAuthority {
         rtype: RecordType,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> LookupResult<Self::Lookup> {
+    ) -> Self::LookupFuture {
         let rr_key = RrKey::new(name.clone(), rtype);
 
         // Collect the records from each rr_set
@@ -1288,12 +1297,16 @@ impl Authority for SqliteAuthority {
                 );
                 Ok(LookupRecords::AnyRecords(result))
             }
-            _ => self
-                .records
-                .get(&rr_key)
-                .map_or(Err(LookupError::from(ResponseCode::NXDomain)), |rr_set| {
-                    Ok(LookupRecords::new(is_secure, supported_algorithms, rr_set.clone()))
-                }),
+            _ => self.records.get(&rr_key).map_or(
+                Err(LookupError::from(ResponseCode::NXDomain)),
+                |rr_set| {
+                    Ok(LookupRecords::new(
+                        is_secure,
+                        supported_algorithms,
+                        rr_set.clone(),
+                    ))
+                },
+            ),
         };
 
         // This is annoying. The 1035 spec literally specifies that most DNS authorities would want to store
@@ -1303,16 +1316,16 @@ impl Authority for SqliteAuthority {
         let result = match result {
             Err(LookupError::ResponseCode(ResponseCode::NXDomain)) => {
                 if self.records.keys().any(|key| key.name() == name) {
-                    return Err(LookupError::NameExists);
+                    return Err(LookupError::NameExists).into_future();
                 } else {
-                    return Err(LookupError::from(ResponseCode::NXDomain));
+                    return Err(LookupError::from(ResponseCode::NXDomain)).into_future();
                 }
-            },
-            Err(e) => return Err(e),
+            }
+            Err(e) => return Err(e).into_future(),
             o => o,
         };
 
-        result.map(AuthLookup::from)
+        result.map(AuthLookup::from).into_future()
     }
 
     // FIXME: move back to a suplied method in the trait
@@ -1321,7 +1334,7 @@ impl Authority for SqliteAuthority {
         query: &LowerQuery,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> LookupResult<Self::Lookup> {
+    ) -> Box<Future<Item = Self::Lookup, Error = LookupError> + Send> {
         debug!("searching SqliteAuthority for: {}", query);
 
         let lookup_name = query.name();
@@ -1332,20 +1345,20 @@ impl Authority for SqliteAuthority {
         if RecordType::AXFR == record_type {
             // TODO: support more advanced AXFR options
             if !self.is_axfr_allowed() {
-                return Err(LookupError::from(ResponseCode::Refused))
+                return Box::new(Err(LookupError::from(ResponseCode::Refused)).into_future());
             }
 
             match self.zone_type() {
                 ZoneType::Master | ZoneType::Slave => (),
                 // TODO: Forward?
-                _ => return Err(LookupError::from(ResponseCode::NXDomain)),
+                _ => return Box::new(Err(LookupError::from(ResponseCode::NXDomain)).into_future()),
             }
         }
 
         // perform the actual lookup
         match record_type {
             RecordType::SOA => {
-                self.lookup(self.origin(), record_type, is_secure, supported_algorithms)
+                Box::new(self.lookup(self.origin(), record_type, is_secure, supported_algorithms))
             }
             RecordType::AXFR => {
                 // TODO: shouldn't these SOA's be secure? at least the first, perhaps not the last?
@@ -1354,25 +1367,28 @@ impl Authority for SqliteAuthority {
                 let records =
                     self.lookup(lookup_name, record_type, is_secure, supported_algorithms);
 
-                let (start_soa, end_soa, records) = match (start_soa, end_soa, records) {
-                    (Err(e), _, _) => return Err(e),
-                    (_, Err(e), _) => return Err(e),
-                    (_, _, Err(e)) => return Err(e),
-                    (Ok(ss), Ok(es), Ok(r)) => (ss, es, r),
-                };
+                let lookup = self
+                    .soa_secure(is_secure, supported_algorithms)
+                    .join3(
+                        self.soa(),
+                        self.lookup(lookup_name, record_type, is_secure, supported_algorithms),
+                    )
+                    .map(|(start_soa, end_soa, records)| {
+                        let lookup = match start_soa {
+                            l @ AuthLookup::Empty => l,
+                            start_soa => AuthLookup::AXFR {
+                                start_soa: start_soa.unwrap_records(),
+                                records: records.unwrap_records(),
+                                end_soa: end_soa.unwrap_records(),
+                            },
+                        };
 
-                let lookup = match start_soa {
-                    l @ AuthLookup::Empty => l,
-                    start_soa => AuthLookup::AXFR {
-                        start_soa: start_soa.unwrap_records(),
-                        records: records.unwrap_records(),
-                        end_soa: end_soa.unwrap_records(),
-                    },
-                };
+                        AuthLookup::from(lookup)
+                    });
 
-                Ok(lookup)
+                Box::new(lookup)
             }
-            _ => self.lookup(lookup_name, record_type, is_secure, supported_algorithms),
+            _ => Box::new(self.lookup(lookup_name, record_type, is_secure, supported_algorithms)),
         }
     }
 
@@ -1389,7 +1405,7 @@ impl Authority for SqliteAuthority {
         name: &LowerName,
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
-    ) -> LookupResult<Self::Lookup> {
+    ) -> Self::LookupFuture {
         #[cfg(feature = "dnssec")]
         fn is_nsec_rrset(rr_set: &RecordSet) -> bool {
             use trust_dns::rr::rdata::DNSSECRecordType;
@@ -1399,16 +1415,15 @@ impl Authority for SqliteAuthority {
 
         // TODO: need a BorrowdRrKey
         let rr_key = RrKey::new(name.clone(), RecordType::DNSSEC(DNSSECRecordType::NSEC));
-        let no_data = self.records
+        let no_data = self
+            .records
             .get(&rr_key)
-            .map(|rr_set| {
-                LookupRecords::new(is_secure, supported_algorithms, rr_set.clone())
-            });
+            .map(|rr_set| LookupRecords::new(is_secure, supported_algorithms, rr_set.clone()));
 
         if no_data.is_some() {
-            return no_data.unwrap().into()
+            return no_data.unwrap().into();
         }
-        
+
         let get_closest_nsec = |name: &LowerName| -> Option<Arc<RecordSet>> {
             self.records
                 .values()
@@ -1418,7 +1433,8 @@ impl Authority for SqliteAuthority {
                 // now find the next record where the covered name is greater
                 .find(|rr_set| {
                     // there should only be one record
-                    rr_set.records(false, SupportedAlgorithms::default())
+                    rr_set
+                        .records(false, SupportedAlgorithms::default())
                         .next()
                         .and_then(|r| r.rdata().as_dnssec())
                         .and_then(|r| r.as_nsec())
@@ -1458,10 +1474,8 @@ impl Authority for SqliteAuthority {
                     vec![closest_proof]
                 }
             }
-            (None, Some(proof)) | (Some(proof), None) => {
-                vec![proof]
-            }
-            (None, None) => { vec![] }
+            (None, Some(proof)) | (Some(proof), None) => vec![proof],
+            (None, None) => vec![],
         };
 
         LookupRecords::many(is_secure, supported_algorithms, proofs).into()

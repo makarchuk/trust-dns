@@ -42,7 +42,7 @@ where
                     debug!("Received request: {:#?}", request);
                     let dns_hostname = dns_hostname.clone();
                     let handler = handler.clone();
-                    let responder = HttpsResponseHandle(respond);
+                    let responder = HttpsResponseHandle(Arc::new(Mutex::new(respond)));
 
                     https_server::message_from(dns_hostname, request)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}", e)))
@@ -62,10 +62,11 @@ where
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("error in h2 handler: {}", e)))
 }
 
-struct HttpsResponseHandle(::h2::server::SendResponse<::bytes::Bytes>);
+#[derive(Clone)]
+struct HttpsResponseHandle(Arc<Mutex<::h2::server::SendResponse<::bytes::Bytes>>>);
 
 impl ResponseHandler for HttpsResponseHandle {
-    fn send_response(mut self, response: MessageResponse) -> io::Result<()> {
+    fn send_response(&self, response: MessageResponse) -> io::Result<()> {
         use bytes::Bytes;
 
         use proto::serialize::binary::BinEncoder;
@@ -84,6 +85,8 @@ impl ResponseHandler for HttpsResponseHandle {
         debug!("sending response: {:#?}", response);
         let mut stream = self
             .0
+            .lock()
+            .expect("https poisoned")
             .send_response(response, false)
             .map_err(HttpsError::from)?;
         stream.send_data(bytes, true).map_err(HttpsError::from)?;

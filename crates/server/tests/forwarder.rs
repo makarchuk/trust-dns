@@ -1,15 +1,19 @@
 #![recursion_limit = "128"]
 
+extern crate futures;
 extern crate trust_dns;
 extern crate trust_dns_server;
 
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+use futures::future::Future;
+
 use trust_dns::rr::{Name, RecordType};
 use trust_dns_server::authority::{Authority, LookupObject};
 use trust_dns_server::store::forwarder::ForwardAuthority;
 
+#[ignore]
 #[test]
 fn test_lookup() {
     let forwarder = ForwardAuthority::new();
@@ -19,7 +23,7 @@ fn test_lookup() {
         RecordType::A,
         false,
         Default::default(),
-    ).unwrap();
+    ).wait().unwrap();
 
     let address = lookup.iter().next().expect("no addresses returned!");
     let address = address.rdata().as_a().expect("not an A record");

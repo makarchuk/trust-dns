@@ -5,6 +5,8 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use std::sync::Arc;
+
 use proto::error::*;
 use proto::op::message::EmitAndCount;
 use proto::op::{message, Edns, Header, MessageType, OpCode, ResponseCode};
@@ -28,7 +30,7 @@ pub struct MessageResponse<
     S: Iterator<Item = &'a Record> + Send + 'a,
 {
     header: Header,
-    queries: Option<&'q Queries<'q>>,
+    queries: &'q Queries,
     answers: A,
     name_servers: N,
     soa: S,
@@ -42,8 +44,8 @@ enum EmptyOrQueries<'q> {
     Queries(QueriesEmitAndCount<'q>),
 }
 
-impl<'q> From<Option<&'q Queries<'q>>> for EmptyOrQueries<'q> {
-    fn from(option: Option<&'q Queries<'q>>) -> Self {
+impl<'q> From<Option<&'q Queries>> for EmptyOrQueries<'q> {
+    fn from(option: Option<&'q Queries>) -> Self {
         option.map_or(EmptyOrQueries::Empty, |q| {
             EmptyOrQueries::Queries(q.as_emit_and_count())
         })
@@ -83,7 +85,7 @@ where
 
         message::emit_message_parts(
             &self.header,
-            &mut EmptyOrQueries::from(self.queries),
+            &mut EmptyOrQueries::from(Some(self.queries)),
             &mut self.answers,
             &mut name_servers,
             &mut self.additionals.iter().cloned(),
@@ -96,7 +98,7 @@ where
 
 /// A builder for MessageResponses
 pub struct MessageResponseBuilder<'q> {
-    queries: Option<&'q Queries<'q>>,
+    queries: Option<&'q Queries>,
     sig0: Option<Vec<Record>>,
     edns: Option<Edns>,
 }
@@ -107,7 +109,7 @@ impl<'q> MessageResponseBuilder<'q> {
     /// # Arguments
     ///
     /// * `queries` - any optional set of Queries to associate with the Response
-    pub fn new(queries: Option<&'q Queries<'q>>) -> MessageResponseBuilder<'q> {
+    pub fn new(queries: Option<&'q Queries>) -> MessageResponseBuilder<'q> {
         MessageResponseBuilder {
             queries,
             sig0: None,
@@ -143,7 +145,7 @@ impl<'q> MessageResponseBuilder<'q> {
     {
         MessageResponse {
             header,
-            queries: self.queries,
+            queries: self.queries.expect("queries is none"),
             answers: answers.into_iter(),
             name_servers: name_servers.into_iter(),
             soa: soa.into_iter(),
@@ -154,10 +156,10 @@ impl<'q> MessageResponseBuilder<'q> {
     }
 
     /// Construct a Response with no associated records
-    pub fn build_no_records(self, header: Header) -> MessageResponse<'q, 'q> {
+    pub fn build_no_records(self, header: Header) -> MessageResponse<'q, 'static> {
         MessageResponse {
             header,
-            queries: self.queries,
+            queries: self.queries.expect("queries is none"),
             answers: Box::new(None.into_iter()),
             name_servers: Box::new(None.into_iter()),
             soa: Box::new(None.into_iter()),
@@ -179,7 +181,7 @@ impl<'q> MessageResponseBuilder<'q> {
         id: u16,
         op_code: OpCode,
         response_code: ResponseCode,
-    ) -> MessageResponse<'q, 'q> {
+    ) -> MessageResponse<'q, 'static> {
         let mut header = Header::default();
         header.set_message_type(MessageType::Response);
         header.set_id(id);
@@ -188,7 +190,7 @@ impl<'q> MessageResponseBuilder<'q> {
 
         MessageResponse {
             header,
-            queries: self.queries,
+            queries: self.queries.expect("queries is none"),
             answers: Box::new(None.into_iter()),
             name_servers: Box::new(None.into_iter()),
             soa: Box::new(None.into_iter()),
@@ -224,9 +226,11 @@ mod tests {
                 .set_dns_class(DNSClass::NONE)
                 .clone();
 
+            let queries = Queries::empty();
+
             let message = MessageResponse {
                 header: Header::new(),
-                queries: None,
+                queries: &queries,
                 answers: iter::repeat(&answer),
                 name_servers: iter::once(&answer),
                 soa: iter::once(&answer),
@@ -260,9 +264,11 @@ mod tests {
                 .set_dns_class(DNSClass::NONE)
                 .clone();
 
+            let queries = Queries::empty();
+
             let message = MessageResponse {
                 header: Header::new(),
-                queries: None,
+                queries: &queries,
                 answers: iter::empty(),
                 name_servers: iter::repeat(&answer),
                 soa: iter::repeat(&answer),
