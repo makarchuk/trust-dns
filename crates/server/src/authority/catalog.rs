@@ -21,7 +21,8 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
 
-use futures::{future, Async, Future, Poll};
+use futures::future::{self, Either};
+use futures::{Async, Future, Poll};
 use tokio::executor::{DefaultExecutor, Executor};
 
 use server::{Request, RequestHandler, ResponseHandler};
@@ -546,20 +547,20 @@ impl<R: ResponseHandler> Future for LookupFuture<R> {
             debug!("performing {} on {}", query, authority.origin());
             let lookup_future = authority.search(query, is_dnssec, supported_algorithms);
 
+            let request_params = RequestParams {
+                is_dnssec,
+                supported_algorithms,
+                query: query.clone(),
+                request: Arc::clone(&self.request),
+            };
+            let response_params = ResponseParams {
+                response_edns: self.response_edns.clone(),
+                response_header,
+                response_handle: self.response_handle.clone(),
+            };
+
             match authority.zone_type() {
                 ZoneType::Master | ZoneType::Slave => {
-                    let request_params = RequestParams {
-                        is_dnssec,
-                        supported_algorithms,
-                        query: query.clone(),
-                        request: Arc::clone(&self.request),
-                    };
-                    let response_params = ResponseParams {
-                        response_edns: self.response_edns.clone(),
-                        response_header,
-                        response_handle: self.response_handle.clone(),
-                    };
-
                     self.lookup = Some(handle_authoritative(
                         self.request.id(),
                         response_params,
@@ -569,7 +570,13 @@ impl<R: ResponseHandler> Future for LookupFuture<R> {
                     ));
                 }
                 ZoneType::Forward | ZoneType::Hint => {
-                    handle_resolve(response_header, lookup_future);
+                    self.lookup = Some(handle_resolve(
+                        self.request.id(),
+                        response_params,
+                        request_params,
+                        lookup_future,
+                        Arc::clone(&ref_authority),
+                    ));
                 }
             }
         }
@@ -583,7 +590,7 @@ fn handle_authoritative<R: ResponseHandler>(
     lookup_future: BoxedLookupFuture,
     authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
 ) -> AuthorityLookup<R> {
-    AuthorityLookup::new(response_params, request_params, lookup_future, authority)
+    AuthorityLookup::authority(response_params, request_params, lookup_future, authority)
 }
 
 struct RequestParams {
@@ -605,11 +612,11 @@ struct AuthorityLookup<R: ResponseHandler> {
     response_params: Option<ResponseParams<R>>,
     request_params: RequestParams,
     authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
-    state: AuthorityLookupState,
+    state: AuthOrResolve,
 }
 
 impl<R: ResponseHandler> AuthorityLookup<R> {
-    fn new(
+    fn authority(
         response_params: ResponseParams<R>,
         request_params: RequestParams,
         record_lookup: BoxedLookupFuture,
@@ -619,7 +626,23 @@ impl<R: ResponseHandler> AuthorityLookup<R> {
             response_params: Some(response_params),
             request_params,
             authority,
-            state: AuthorityLookupState::Records { record_lookup },
+            state: AuthOrResolve::AuthorityLookupState(AuthorityLookupState::Records {
+                record_lookup,
+            }),
+        }
+    }
+
+    fn resolve(
+        response_params: ResponseParams<R>,
+        request_params: RequestParams,
+        record_lookup: BoxedLookupFuture,
+        authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
+    ) -> Self {
+        AuthorityLookup {
+            response_params: Some(response_params),
+            request_params,
+            authority,
+            state: AuthOrResolve::ResolveLookupState(ResolveLookupState::Records { record_lookup }),
         }
     }
 }
@@ -657,6 +680,37 @@ impl<R: ResponseHandler> Future for AuthorityLookup<R> {
         .ok();
 
         Ok(Async::Ready(()))
+    }
+}
+
+#[must_use = "futures do nothing unless polled"]
+enum AuthOrResolve {
+    AuthorityLookupState(AuthorityLookupState),
+    ResolveLookupState(ResolveLookupState),
+}
+
+impl AuthOrResolve {
+    fn poll<R: ResponseHandler>(
+        &mut self,
+        request_params: &RequestParams,
+        response_params: &mut ResponseParams<R>,
+        authority: &Arc<RwLock<Box<dyn AuthorityObject>>>,
+    ) -> Poll<
+        (
+            Box<dyn LookupObject>,
+            Box<dyn LookupObject>,
+            Box<dyn LookupObject>,
+        ),
+        (),
+    > {
+        match self {
+            AuthOrResolve::AuthorityLookupState(a) => {
+                a.poll(request_params, response_params, authority)
+            }
+            AuthOrResolve::ResolveLookupState(r) => {
+                r.poll(request_params, response_params, authority)
+            }
+        }
     }
 }
 
@@ -860,6 +914,60 @@ impl AuthorityLookupState {
     }
 }
 
-fn handle_resolve(response_header: Header, lookup_future: BoxedLookupFuture) {
-    unimplemented!()
+fn handle_resolve<R: ResponseHandler>(
+    request_id: u16,
+    response_params: ResponseParams<R>,
+    request_params: RequestParams,
+    lookup_future: BoxedLookupFuture,
+    authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
+) -> AuthorityLookup<R> {
+    AuthorityLookup::resolve(response_params, request_params, lookup_future, authority)
+}
+
+/// state machine for handling the response to the request
+#[must_use = "futures do nothing unless polled"]
+enum ResolveLookupState {
+    /// This is the initial lookup for the Records
+    Records { record_lookup: BoxedLookupFuture },
+}
+
+impl ResolveLookupState {
+    fn poll<R: ResponseHandler>(
+        &mut self,
+        request_params: &RequestParams,
+        response_params: &mut ResponseParams<R>,
+        authority: &Arc<RwLock<Box<dyn AuthorityObject>>>,
+    ) -> Poll<
+        (
+            Box<dyn LookupObject>,
+            Box<dyn LookupObject>,
+            Box<dyn LookupObject>,
+        ),
+        (),
+    > {
+        loop {
+            // FIXME: way more states to consider.
+            /* *self = */
+            match self {
+                /// In this state we await the records, on success we transition to getting
+                ///   NS records, which indicate an authoritative response.
+                ///
+                /// On Errors, the transition depends on the type of error.
+                ResolveLookupState::Records { record_lookup } => {
+                    let records = try_ready!(record_lookup
+                        .poll()
+                        .map_err(|e| error!("error resolving: {}", e)));
+                    // need to clone the result codes...
+
+                    response_params.response_header.set_authoritative(false);
+
+                    return Ok(Async::Ready((
+                        records,
+                        Box::new(AuthLookup::default()) as Box<dyn LookupObject>,
+                        Box::new(AuthLookup::default()) as Box<dyn LookupObject>,
+                    )));
+                }
+            }
+        }
+    }
 }

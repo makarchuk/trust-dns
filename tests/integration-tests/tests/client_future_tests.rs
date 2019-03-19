@@ -45,7 +45,7 @@ use trust_dns_integration::{NeverReturnsClientStream, TestClientStream};
 
 #[test]
 fn test_query_nonet() {
-    env_logger::init();
+    // env_logger::init();
 
     let authority = create_example();
     let mut catalog = Catalog::new();

@@ -36,7 +36,7 @@ use trust_dns::udp::UdpClientStream;
 // #[cfg(feature = "dns-over-openssl")]
 // use trust_dns_openssl::TlsClientStreamBuilder;
 
-use server_harness::{named_test_harness, query_a};
+use server_harness::{named_test_harness, query_a, query_message};
 
 #[test]
 fn test_example_toml_startup() {
@@ -158,7 +158,8 @@ fn test_nodata_where_name_exists() {
                 Name::from_str("www.example.com.").unwrap(),
                 DNSClass::IN,
                 RecordType::SRV,
-            )).unwrap();
+            ))
+            .unwrap();
         assert_eq!(msg.response_code(), ResponseCode::NoError);
         assert!(msg.answers().is_empty());
         assert!(true);
@@ -180,7 +181,8 @@ fn test_nxdomain_where_no_name_exists() {
                 Name::from_str("nxdomain.example.com.").unwrap(),
                 DNSClass::IN,
                 RecordType::SRV,
-            )).unwrap();
+            ))
+            .unwrap();
         assert_eq!(msg.response_code(), ResponseCode::NXDomain);
         assert!(msg.answers().is_empty());
         assert!(true);
@@ -250,7 +252,7 @@ fn test_server_continues_on_bad_data_tcp() {
 #[test]
 fn test_forward() {
     env_logger::init();
-    
+
     named_test_harness("example_forwarder.toml", |port, _, _| {
         let mut io_loop = Runtime::new().unwrap();
         let addr: SocketAddr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), port);
@@ -258,7 +260,16 @@ fn test_forward() {
         let (bg, mut client) = ClientFuture::new(Box::new(stream), sender, None);
 
         io_loop.spawn(bg);
-        query_a(&mut io_loop, &mut client);
+        let response = query_message(
+            &mut io_loop,
+            &mut client,
+            Name::from_str("www.example.com").unwrap(),
+            RecordType::A,
+        );
+        assert_eq!(
+            *response.answers()[0].rdata().as_a().unwrap(),
+            Ipv4Addr::new(93, 184, 216, 34)
+        );
 
         // just tests that multiple queries work
         let addr: SocketAddr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), port);
@@ -266,6 +277,15 @@ fn test_forward() {
         let (bg, mut client) = ClientFuture::new(Box::new(stream), sender, None);
 
         io_loop.spawn(bg);
-        query_a(&mut io_loop, &mut client);
+        let response = query_message(
+            &mut io_loop,
+            &mut client,
+            Name::from_str("www.example.com").unwrap(),
+            RecordType::A,
+        );
+        assert_eq!(
+            *response.answers()[0].rdata().as_a().unwrap(),
+            Ipv4Addr::new(93, 184, 216, 34)
+        );
     })
 }
