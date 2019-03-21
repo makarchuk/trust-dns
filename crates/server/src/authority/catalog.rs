@@ -21,9 +21,7 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
 
-use futures::future::{self, Either};
 use futures::{Async, Future, Poll};
-use tokio::executor::{DefaultExecutor, Executor};
 
 use server::{Request, RequestHandler, ResponseHandler};
 use trust_dns::op::{Edns, Header, LowerQuery, MessageType, OpCode, ResponseCode};
@@ -32,7 +30,7 @@ use trust_dns::rr::rdata::opt::{EdnsCode, EdnsOption};
 use trust_dns::rr::{LowerName, RecordType};
 
 use authority::{AuthLookup, MessageRequest, MessageResponse, MessageResponseBuilder, ZoneType};
-use authority::{AuthorityObject, BoxedLookupFuture, LookupError, LookupObject, LookupResult};
+use authority::{AuthorityObject, BoxedLookupFuture, LookupError, LookupObject};
 
 /// Set of authorities, zones, available to this server.
 #[derive(Default)]
@@ -131,7 +129,7 @@ impl RequestHandler for Catalog {
                 }
                 OpCode::Update => {
                     debug!("update received: {}", request_message.id());
-                    /// TODO: this should be a future
+                    // TODO: this should be a future
                     let result = self.update(&request_message, response_edns, response_handle);
                     HandleRequest::result(result)
                 }
@@ -189,7 +187,7 @@ impl Future for HandleRequest {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         match self {
             HandleRequest::LookupFuture(lookup) => lookup.poll(),
-            HandleRequest::Result(Ok(res)) => Ok(Async::Ready(())),
+            HandleRequest::Result(Ok(_)) => Ok(Async::Ready(())),
             HandleRequest::Result(Err(res)) => {
                 error!("update failed: {}", res);
                 Ok(Async::Ready(()))
@@ -448,6 +446,7 @@ impl Catalog {
 }
 
 /// A Future that runs the lookups and responds to the requests
+#[allow(clippy::type_complexity)]
 #[must_use = "futures do nothing unless polled"]
 pub struct LookupFuture<R: ResponseHandler> {
     request: Arc<MessageRequest>,
@@ -458,6 +457,7 @@ pub struct LookupFuture<R: ResponseHandler> {
 }
 
 impl<R: ResponseHandler> LookupFuture<R> {
+    #[allow(clippy::type_complexity)]
     fn new(
         request: Arc<MessageRequest>,
         response_edns: Option<Arc<Edns>>,
@@ -561,7 +561,7 @@ impl<R: ResponseHandler> Future for LookupFuture<R> {
 
             match authority.zone_type() {
                 ZoneType::Master | ZoneType::Slave => {
-                    self.lookup = Some(handle_authoritative(
+                    self.lookup = Some(AuthorityLookup::authority(
                         self.request.id(),
                         response_params,
                         request_params,
@@ -570,7 +570,7 @@ impl<R: ResponseHandler> Future for LookupFuture<R> {
                     ));
                 }
                 ZoneType::Forward | ZoneType::Hint => {
-                    self.lookup = Some(handle_resolve(
+                    self.lookup = Some(AuthorityLookup::resolve(
                         self.request.id(),
                         response_params,
                         request_params,
@@ -581,16 +581,6 @@ impl<R: ResponseHandler> Future for LookupFuture<R> {
             }
         }
     }
-}
-
-fn handle_authoritative<R: ResponseHandler>(
-    request_id: u16,
-    response_params: ResponseParams<R>,
-    request_params: RequestParams,
-    lookup_future: BoxedLookupFuture,
-    authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
-) -> AuthorityLookup<R> {
-    AuthorityLookup::authority(response_params, request_params, lookup_future, authority)
 }
 
 struct RequestParams {
@@ -617,11 +607,14 @@ struct AuthorityLookup<R: ResponseHandler> {
 
 impl<R: ResponseHandler> AuthorityLookup<R> {
     fn authority(
+        request_id: u16,
         response_params: ResponseParams<R>,
         request_params: RequestParams,
         record_lookup: BoxedLookupFuture,
         authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
     ) -> Self {
+        debug!("handling authoritative request: {}", request_id);
+
         AuthorityLookup {
             response_params: Some(response_params),
             request_params,
@@ -633,11 +626,14 @@ impl<R: ResponseHandler> AuthorityLookup<R> {
     }
 
     fn resolve(
+        request_id: u16,
         response_params: ResponseParams<R>,
         request_params: RequestParams,
         record_lookup: BoxedLookupFuture,
         authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
     ) -> Self {
+        debug!("handling forwarded resolve: {}", request_id);
+
         AuthorityLookup {
             response_params: Some(response_params),
             request_params,
@@ -690,6 +686,7 @@ enum AuthOrResolve {
 }
 
 impl AuthOrResolve {
+    #[allow(clippy::type_complexity)]
     fn poll<R: ResponseHandler>(
         &mut self,
         request_params: &RequestParams,
@@ -741,6 +738,7 @@ enum AuthorityLookupState {
 }
 
 impl AuthorityLookupState {
+    #[allow(clippy::type_complexity)]
     fn poll<R: ResponseHandler>(
         &mut self,
         request_params: &RequestParams,
@@ -756,10 +754,10 @@ impl AuthorityLookupState {
     > {
         loop {
             *self = match self {
-                /// In this state we await the records, on success we transition to getting
-                ///   NS records, which indicate an authoritative response.
-                ///
-                /// On Errors, the transition depends on the type of error.
+                // In this state we await the records, on success we transition to getting
+                //   NS records, which indicate an authoritative response.
+                //
+                // On Errors, the transition depends on the type of error.
                 AuthorityLookupState::Records { record_lookup } => {
                     match record_lookup.poll() {
                         Ok(Async::NotReady) => return Ok(Async::NotReady),
@@ -914,16 +912,6 @@ impl AuthorityLookupState {
     }
 }
 
-fn handle_resolve<R: ResponseHandler>(
-    request_id: u16,
-    response_params: ResponseParams<R>,
-    request_params: RequestParams,
-    lookup_future: BoxedLookupFuture,
-    authority: Arc<RwLock<Box<dyn AuthorityObject>>>,
-) -> AuthorityLookup<R> {
-    AuthorityLookup::resolve(response_params, request_params, lookup_future, authority)
-}
-
 /// state machine for handling the response to the request
 #[must_use = "futures do nothing unless polled"]
 enum ResolveLookupState {
@@ -932,11 +920,12 @@ enum ResolveLookupState {
 }
 
 impl ResolveLookupState {
+    #[allow(clippy::type_complexity)]
     fn poll<R: ResponseHandler>(
         &mut self,
-        request_params: &RequestParams,
+        _request_params: &RequestParams,
         response_params: &mut ResponseParams<R>,
-        authority: &Arc<RwLock<Box<dyn AuthorityObject>>>,
+        _authority: &Arc<RwLock<Box<dyn AuthorityObject>>>,
     ) -> Poll<
         (
             Box<dyn LookupObject>,
@@ -945,14 +934,15 @@ impl ResolveLookupState {
         ),
         (),
     > {
+        #[allow(clippy::never_loop)]
         loop {
             // FIXME: way more states to consider.
             /* *self = */
             match self {
-                /// In this state we await the records, on success we transition to getting
-                ///   NS records, which indicate an authoritative response.
-                ///
-                /// On Errors, the transition depends on the type of error.
+                // In this state we await the records, on success we transition to getting
+                //   NS records, which indicate an authoritative response.
+                //
+                // On Errors, the transition depends on the type of error.
                 ResolveLookupState::Records { record_lookup } => {
                     let records = try_ready!(record_lookup
                         .poll()

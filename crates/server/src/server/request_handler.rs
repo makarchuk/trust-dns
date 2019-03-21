@@ -7,7 +7,6 @@
 
 //! Request Handler for incoming requests
 
-use std::io;
 use std::net::SocketAddr;
 
 use futures::Future;

@@ -9,8 +9,6 @@ use std::error;
 use std::fmt;
 use std::io;
 
-use futures::{Async, Future, Poll};
-
 use trust_dns::op::ResponseCode;
 use trust_dns_resolver::error::ResolveError;
 

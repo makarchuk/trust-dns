@@ -10,9 +10,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
-#[cfg(feature = "serde-config")]
-use serde::Deserializer;
-
 use proto::rr::Name;
 
 /// Configuration for the upstream nameservers to use for resolution

@@ -5,14 +5,11 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use std::borrow::Borrow;
-use std::sync::Mutex;
-
-use futures::{future::FutureResult, Async, Future, Poll};
+use futures::{Async, Future, Poll};
 
 use trust_dns::op::LowerQuery;
 use trust_dns::op::ResponseCode;
-use trust_dns::rr::dnssec::{DnsSecResult, Signer, SupportedAlgorithms};
+use trust_dns::rr::dnssec::SupportedAlgorithms;
 use trust_dns::rr::{LowerName, Name, Record, RecordType};
 use trust_dns_resolver::config::ResolverConfig;
 use trust_dns_resolver::lookup::Lookup as ResolverLookup;
@@ -30,31 +27,29 @@ pub struct ForwardAuthority {
 }
 
 impl ForwardAuthority {
-    // // FIXME: drop this?
+    /// FIXME: drop this?
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         // FIXME: error here
         let (resolver, bg) = AsyncResolver::from_system_conf().unwrap();
-        let bg = Box::new(bg);
+        let _bg = Box::new(bg);
 
         ForwardAuthority {
             origin: Name::root().into(),
-            resolver: resolver,
+            resolver,
         }
     }
 
     /// Read the Authority for the origin from the specified configuration
     pub fn try_from_config(
         origin: Name,
-        zone_type: ZoneType,
+        _zone_type: ZoneType,
         config: &ForwardConfig,
     ) -> Result<(Self, impl Future<Item = (), Error = ()>), String> {
-        use std::fs::File;
-        use std::io::Read;
-
         info!("loading forwarder config: {}", origin);
 
         let name_servers = config.name_servers.clone();
-        let options = config.options.clone().unwrap_or_default();
+        let options = config.options.unwrap_or_default();
         let config = ResolverConfig::from_parts(None, vec![], name_servers);
 
         let (resolver, bg) = AsyncResolver::new(config, options);
@@ -106,9 +101,6 @@ impl Authority for ForwardAuthority {
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
     ) -> Self::LookupFuture {
-        use futures::future::Executor;
-        use tokio_executor::DefaultExecutor;
-
         // FIXME: make this an error
         assert!(self.origin.zone_of(name));
 

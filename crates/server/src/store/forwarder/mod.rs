@@ -7,6 +7,8 @@
 
 #![cfg(feature = "trust-dns-resolver")]
 
+//! Forwarding, resolver, related types
+
 mod authority;
 mod config;
 

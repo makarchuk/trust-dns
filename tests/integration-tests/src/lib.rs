@@ -83,16 +83,16 @@ impl TestResponseHandler {
 
     fn into_inner(self) -> impl Future<Item = Vec<u8>, Error = ()> {
         future::poll_fn(move || {
-            if !self
+            if self
                 .message_ready
                 .compare_exchange(true, false, Ordering::Acquire, Ordering::Relaxed)
                 .is_ok()
             {
-                task::current().notify();
-                Ok(Async::NotReady)
-            } else {
                 let bytes: Vec<u8> = mem::replace(&mut self.buf.lock().unwrap(), vec![]);
                 Ok(Async::Ready(bytes))
+            } else {
+                task::current().notify();
+                Ok(Async::NotReady)
             }
         })
     }

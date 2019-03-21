@@ -257,6 +257,7 @@ impl<'r> Iterator for AnyRecordsIter<'r> {
 /// The result of a lookup
 #[derive(Debug)]
 pub enum LookupRecords {
+    /// The empty set of records
     Empty,
     /// The associate records
     Records {

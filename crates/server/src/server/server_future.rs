@@ -60,6 +60,7 @@ impl<T: RequestHandler> ServerFuture<T> {
                 .map_err(|e| panic!("error in UDP request_stream handler: {}", e))
                 .for_each(move |message| {
                     let src_addr = message.addr();
+                    debug!("received udp request from: {}", src_addr);
                     self::handle_raw_request(message, handler.clone(), stream_handle.clone())
                 }),
         );
@@ -344,7 +345,7 @@ impl<T: RequestHandler> ServerFuture<T> {
                                             stream_handle.clone(),
                                         )
                                     })
-                                    .map_err(move |e| {
+                                    .map_err(move |_| {
                                         debug!("error in TLS request_stream src: {:?}", src_addr)
                                     }),
                             );
@@ -456,7 +457,7 @@ impl<T: RequestHandler> ServerFuture<T> {
                     //     debug!("error HTTPS handshake: {:?} error: {:?}", src_addr, e)
                     // })
                 })
-                .map_err(|e| panic!("error in inbound https_stream"))
+                .map_err(|_| panic!("error in inbound https_stream"))
         }));
 
         Ok(())

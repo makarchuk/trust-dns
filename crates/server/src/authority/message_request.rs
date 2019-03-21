@@ -217,13 +217,6 @@ pub struct Queries {
 }
 
 impl Queries {
-    pub(crate) fn empty() -> Self {
-        Queries {
-            queries: vec![],
-            original: Box::new([]),
-        }
-    }
-
     fn read_queries(decoder: &mut BinDecoder, count: usize) -> ProtoResult<Vec<LowerQuery>> {
         let mut queries = Vec::with_capacity(count);
         for _ in 0..count {

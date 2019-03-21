@@ -261,11 +261,13 @@ impl LookupObject for EmptyLookup {
     }
 }
 
+/// A boxed lookup future
 pub struct BoxedLookupFuture(
     Box<dyn Future<Item = Box<dyn LookupObject>, Error = LookupError> + Send>,
 );
 
 impl BoxedLookupFuture {
+    /// Performs a conversion (boxes) into the future
     pub fn from<T>(future: T) -> Self
     where
         T: Future<Item = Box<dyn LookupObject>, Error = LookupError> + Send + Sized + 'static,
@@ -273,6 +275,7 @@ impl BoxedLookupFuture {
         BoxedLookupFuture(Box::new(future))
     }
 
+    /// Creates an empty (i.e. no records) lookup future
     pub fn empty() -> Self {
         BoxedLookupFuture(Box::new(future::ok(
             Box::new(EmptyLookup) as Box<dyn LookupObject>

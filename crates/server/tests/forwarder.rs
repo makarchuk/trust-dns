@@ -18,12 +18,15 @@ use trust_dns_server::store::forwarder::ForwardAuthority;
 fn test_lookup() {
     let forwarder = ForwardAuthority::new();
 
-    let lookup = forwarder.lookup(
-        &Name::from_str("www.example.com.").unwrap().into(),
-        RecordType::A,
-        false,
-        Default::default(),
-    ).wait().unwrap();
+    let lookup = forwarder
+        .lookup(
+            &Name::from_str("www.example.com.").unwrap().into(),
+            RecordType::A,
+            false,
+            Default::default(),
+        )
+        .wait()
+        .unwrap();
 
     let address = lookup.iter().next().expect("no addresses returned!");
     let address = address.rdata().as_a().expect("not an A record");

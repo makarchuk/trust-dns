@@ -642,28 +642,19 @@ impl Authority for FileAuthority {
             }
             RecordType::AXFR => {
                 // TODO: shouldn't these SOA's be secure? at least the first, perhaps not the last?
-                let start_soa = self.soa_secure(is_secure, supported_algorithms);
-                let end_soa = self.soa();
-                let records =
-                    self.lookup(lookup_name, record_type, is_secure, supported_algorithms);
-
                 let lookup = self
                     .soa_secure(is_secure, supported_algorithms)
                     .join3(
                         self.soa(),
                         self.lookup(lookup_name, record_type, is_secure, supported_algorithms),
                     )
-                    .map(|(start_soa, end_soa, records)| {
-                        let lookup = match start_soa {
-                            l @ AuthLookup::Empty => l,
-                            start_soa => AuthLookup::AXFR {
-                                start_soa: start_soa.unwrap_records(),
-                                records: records.unwrap_records(),
-                                end_soa: end_soa.unwrap_records(),
-                            },
-                        };
-
-                        AuthLookup::from(lookup)
+                    .map(|(start_soa, end_soa, records)| match start_soa {
+                        l @ AuthLookup::Empty => l,
+                        start_soa => AuthLookup::AXFR {
+                            start_soa: start_soa.unwrap_records(),
+                            records: records.unwrap_records(),
+                            end_soa: end_soa.unwrap_records(),
+                        },
                     });
 
                 Box::new(lookup)

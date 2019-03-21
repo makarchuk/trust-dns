@@ -9,7 +9,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use futures::{future, Future, Stream};
+use futures::{Future, Stream};
 use h2::server;
 use proto::serialize::binary::BinDecodable;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -62,7 +62,7 @@ where
                         })
                 })
         })
-        .map_err(|e| warn!("error in h2 handler"))
+        .map_err(|_| warn!("error in h2 handler"))
 }
 
 #[derive(Clone)]
