@@ -72,9 +72,9 @@ pub fn test_update_errors<A: Authority<Lookup = AuthLookup>>(mut authority: A) {
     assert!(authority.update(&update).is_err());
 }
 
-pub fn test_dots_in_name<A: Authority>(authority: A) {
+pub fn test_dots_in_name<A: Authority<Lookup = AuthLookup>>(authority: A) {
     let query = Query::query(Name::from_str("this.has.dots.example.com.").unwrap(), RecordType::A);
-    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new());
+    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new()).wait().unwrap();
     
     assert_eq!(
         *lookup
@@ -89,30 +89,26 @@ pub fn test_dots_in_name<A: Authority>(authority: A) {
 
     // the rest should all be NameExists
     let query = Query::query(Name::from_str("has.dots.example.com.").unwrap(), RecordType::A);
-    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new());
+    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new()).wait().unwrap_err();
     
-    assert!(lookup.was_empty());
-    assert!(lookup.is_name_exists());
+    assert!(lookup.is_name_exists(), "lookup: {}", lookup);
 
     // the rest should all be NameExists
     let query = Query::query(Name::from_str("dots.example.com.").unwrap(), RecordType::A);
-    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new());
+    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new()).wait().unwrap_err();
     
-    assert!(lookup.was_empty());
     assert!(lookup.is_name_exists());
 
     // the rest should all be NameExists
     let query = Query::query(Name::from_str("example.com.").unwrap(), RecordType::A);
-    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new());
+    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new()).wait().unwrap_err();
     
-    assert!(lookup.was_empty());
     assert!(lookup.is_name_exists());
 
     // and this should be an NXDOMAIN
     let query = Query::query(Name::from_str("not.this.has.dots.example.com.").unwrap(), RecordType::A);
-    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new());
+    let lookup = authority.search(&query.into(), false, SupportedAlgorithms::new()).wait().unwrap_err();
     
-    assert!(lookup.was_empty());
     assert!(lookup.is_nx_domain());
 }
 

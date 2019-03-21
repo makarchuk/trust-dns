@@ -9,7 +9,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use futures::{Future, Stream};
+use futures::{future, Future, Stream};
 use h2::server;
 use proto::serialize::binary::BinDecodable;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -25,19 +25,19 @@ pub fn h2_handler<T, I>(
     io: I,
     src_addr: SocketAddr,
     dns_hostname: Arc<String>,
-) -> impl Future<Item = (), Error = io::Error>
+) -> impl Future<Item = (), Error = ()>
 where
     T: RequestHandler,
     I: AsyncRead + AsyncWrite,
 {
     // Start the HTTP/2.0 connection handshake
     server::handshake(io)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}", e)))
+        .map_err(|e| warn!("h2 handshake error: {}", e))
         .and_then(move |h2| {
             let dns_hostname = dns_hostname.clone();
             // Accept all inbound HTTP/2.0 streams sent over the
             // connection.
-            h2.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}", e)))
+            h2.map_err(|e| warn!("h2 failed to receive message: {}", e))
                 .for_each(move |(request, respond)| {
                     debug!("Received request: {:#?}", request);
                     let dns_hostname = dns_hostname.clone();
@@ -45,9 +45,12 @@ where
                     let responder = HttpsResponseHandle(Arc::new(Mutex::new(respond)));
 
                     https_server::message_from(dns_hostname, request)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}", e)))
-                        .and_then(move |bytes| {
-                            let message = BinDecodable::from_bytes(&bytes)?;
+                        .map_err(|e| warn!("h2 failed to receive message: {}", e))
+                        .and_then(|bytes| {
+                            BinDecodable::from_bytes(&bytes)
+                                .map_err(|e| warn!("could not decode message: {}", e))
+                        })
+                        .and_then(move |message| {
                             debug!("reieved message: {:?}", message);
 
                             server_future::handle_request(
@@ -59,7 +62,7 @@ where
                         })
                 })
         })
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("error in h2 handler: {}", e)))
+        .map_err(|e| warn!("error in h2 handler"))
 }
 
 #[derive(Clone)]

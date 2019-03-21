@@ -331,6 +331,12 @@ impl<T: RequestHandler> ServerFuture<T> {
                             // and spawn to the io_loop
                             tokio_executor::spawn(
                                 timeout_stream
+                                    .map_err(move |e| {
+                                        debug!(
+                                            "error in TLS request_stream src: {:?} error: {}",
+                                            src_addr, e
+                                        )
+                                    })
                                     .for_each(move |message| {
                                         self::handle_raw_request(
                                             message,
@@ -339,10 +345,7 @@ impl<T: RequestHandler> ServerFuture<T> {
                                         )
                                     })
                                     .map_err(move |e| {
-                                        debug!(
-                                            "error in TLS request_stream src: {:?} error: {}",
-                                            src_addr, e
-                                        )
+                                        debug!("error in TLS request_stream src: {:?}", src_addr)
                                     }),
                             );
 
@@ -433,6 +436,7 @@ impl<T: RequestHandler> ServerFuture<T> {
 
             listener
                 .incoming()
+                .map_err(|e| warn!("error in inbound https_stream: {}", e))
                 .for_each(move |tcp_stream| {
                     let src_addr = tcp_stream.peer_addr().unwrap();
                     debug!("accepted request from: {}", src_addr);
@@ -443,12 +447,7 @@ impl<T: RequestHandler> ServerFuture<T> {
                     // take the created stream...
                     tls_acceptor
                         .accept(tcp_stream)
-                        .map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::ConnectionRefused,
-                                format!("tls error: {}", e),
-                            )
-                        })
+                        .map_err(|e| warn!("tls error: {}", e))
                         .and_then(move |tls_stream| {
                             h2_handler(handler, tls_stream, src_addr, dns_hostname)
                         })
@@ -457,7 +456,7 @@ impl<T: RequestHandler> ServerFuture<T> {
                     //     debug!("error HTTPS handshake: {:?} error: {:?}", src_addr, e)
                     // })
                 })
-                .map_err(|e| panic!("error in inbound https_stream: {}", e))
+                .map_err(|e| panic!("error in inbound https_stream"))
         }));
 
         Ok(())

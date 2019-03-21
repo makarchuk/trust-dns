@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use futures::future::{Future, FutureResult, IntoFuture};
+use futures::future::{self, Future, FutureResult, IntoFuture};
 
 use trust_dns::op::LowerQuery;
 use trust_dns::op::ResponseCode;
@@ -1315,7 +1315,11 @@ impl Authority for SqliteAuthority {
         //   generally return NoError and no results when other types exist at the same name. bah.
         let result = match result {
             Err(LookupError::ResponseCode(ResponseCode::NXDomain)) => {
-                if self.records.keys().any(|key| key.name() == name) {
+                if self
+                    .records
+                    .keys()
+                    .any(|key| key.name() == name || name.zone_of(key.name()))
+                {
                     return Err(LookupError::NameExists).into_future();
                 } else {
                     return Err(LookupError::from(ResponseCode::NXDomain)).into_future();
@@ -1406,10 +1410,9 @@ impl Authority for SqliteAuthority {
         is_secure: bool,
         supported_algorithms: SupportedAlgorithms,
     ) -> Self::LookupFuture {
-        #[cfg(feature = "dnssec")]
-        fn is_nsec_rrset(rr_set: &RecordSet) -> bool {
-            use trust_dns::rr::rdata::DNSSECRecordType;
+        use trust_dns::rr::rdata::DNSSECRecordType;
 
+        fn is_nsec_rrset(rr_set: &RecordSet) -> bool {
             rr_set.record_type() == RecordType::DNSSEC(DNSSECRecordType::NSEC)
         }
 
@@ -1421,7 +1424,7 @@ impl Authority for SqliteAuthority {
             .map(|rr_set| LookupRecords::new(is_secure, supported_algorithms, rr_set.clone()));
 
         if no_data.is_some() {
-            return no_data.unwrap().into();
+            return future::result(Ok(no_data.unwrap().into()));
         }
 
         let get_closest_nsec = |name: &LowerName| -> Option<Arc<RecordSet>> {
@@ -1478,7 +1481,12 @@ impl Authority for SqliteAuthority {
             (None, None) => vec![],
         };
 
-        LookupRecords::many(is_secure, supported_algorithms, proofs).into()
+        future::result(Ok(LookupRecords::many(
+            is_secure,
+            supported_algorithms,
+            proofs,
+        )
+        .into()))
     }
 
     #[cfg(not(feature = "dnssec"))]
@@ -1487,8 +1495,8 @@ impl Authority for SqliteAuthority {
         _name: &LowerName,
         _is_secure: bool,
         _supported_algorithms: SupportedAlgorithms,
-    ) -> AuthLookup {
-        AuthLookup::default()
+    ) -> Self::LookupFuture {
+        future::result(Ok(AuthLookup::default()))
     }
 
     #[cfg(feature = "dnssec")]

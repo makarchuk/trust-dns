@@ -17,7 +17,7 @@ use trust_dns::rr::dnssec::*;
 use trust_dns::rr::rdata::*;
 use trust_dns::rr::*;
 
-use trust_dns_server::authority::{Authority, ZoneType};
+use trust_dns_server::authority::{Authority, MessageRequest, ZoneType};
 use trust_dns_server::store::sqlite::{Journal, SqliteAuthority};
 
 use trust_dns_integration::authority::create_example;

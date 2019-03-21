@@ -30,7 +30,7 @@ pub struct MessageResponse<
     S: Iterator<Item = &'a Record> + Send + 'a,
 {
     header: Header,
-    queries: &'q Queries,
+    queries: Option<&'q Queries>,
     answers: A,
     name_servers: N,
     soa: S,
@@ -85,7 +85,7 @@ where
 
         message::emit_message_parts(
             &self.header,
-            &mut EmptyOrQueries::from(Some(self.queries)),
+            &mut EmptyOrQueries::from(self.queries),
             &mut self.answers,
             &mut name_servers,
             &mut self.additionals.iter().cloned(),
@@ -145,7 +145,7 @@ impl<'q> MessageResponseBuilder<'q> {
     {
         MessageResponse {
             header,
-            queries: self.queries.expect("queries is none"),
+            queries: self.queries,
             answers: answers.into_iter(),
             name_servers: name_servers.into_iter(),
             soa: soa.into_iter(),
@@ -159,7 +159,7 @@ impl<'q> MessageResponseBuilder<'q> {
     pub fn build_no_records(self, header: Header) -> MessageResponse<'q, 'static> {
         MessageResponse {
             header,
-            queries: self.queries.expect("queries is none"),
+            queries: self.queries,
             answers: Box::new(None.into_iter()),
             name_servers: Box::new(None.into_iter()),
             soa: Box::new(None.into_iter()),
@@ -190,7 +190,7 @@ impl<'q> MessageResponseBuilder<'q> {
 
         MessageResponse {
             header,
-            queries: self.queries.expect("queries is none"),
+            queries: self.queries,
             answers: Box::new(None.into_iter()),
             name_servers: Box::new(None.into_iter()),
             soa: Box::new(None.into_iter()),
@@ -226,11 +226,9 @@ mod tests {
                 .set_dns_class(DNSClass::NONE)
                 .clone();
 
-            let queries = Queries::empty();
-
             let message = MessageResponse {
                 header: Header::new(),
-                queries: &queries,
+                queries: None,
                 answers: iter::repeat(&answer),
                 name_servers: iter::once(&answer),
                 soa: iter::once(&answer),
@@ -264,11 +262,9 @@ mod tests {
                 .set_dns_class(DNSClass::NONE)
                 .clone();
 
-            let queries = Queries::empty();
-
             let message = MessageResponse {
                 header: Header::new(),
-                queries: &queries,
+                queries: None,
                 answers: iter::empty(),
                 name_servers: iter::repeat(&answer),
                 soa: iter::repeat(&answer),
