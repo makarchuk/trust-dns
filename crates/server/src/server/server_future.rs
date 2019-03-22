@@ -212,6 +212,12 @@ impl<T: RequestHandler> ServerFuture<T> {
                             // and spawn to the io_loop
                             tokio_executor::spawn(
                                 timeout_stream
+                                    .map_err(move |e| {
+                                        debug!(
+                                            "error in TLS request_stream src: {:?} error: {}",
+                                            src_addr, e
+                                        )
+                                    })
                                     .for_each(move |message| {
                                         self::handle_raw_request(
                                             message,
@@ -219,11 +225,8 @@ impl<T: RequestHandler> ServerFuture<T> {
                                             stream_handle.clone(),
                                         )
                                     })
-                                    .map_err(move |e| {
-                                        debug!(
-                                            "error in TLS request_stream src: {:?} error: {}",
-                                            src_addr, e
-                                        )
+                                    .map_err(move |_| {
+                                        debug!("error in TLS request_stream src: {:?}", src_addr)
                                     }),
                             );
 
@@ -261,7 +264,7 @@ impl<T: RequestHandler> ServerFuture<T> {
         certificate_and_key: ((X509, Option<Stack<X509>>), PKey<Private>),
     ) -> io::Result<()> {
         self.register_tls_listener(
-            tokio_tcp::TcpListener::from_std(listener, &Handle::current())?,
+            tokio_tcp::TcpListener::from_std(listener, &Handle::default())?,
             timeout,
             certificate_and_key,
         )

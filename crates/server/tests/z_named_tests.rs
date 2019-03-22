@@ -36,7 +36,7 @@ use trust_dns::udp::UdpClientStream;
 // #[cfg(feature = "dns-over-openssl")]
 // use trust_dns_openssl::TlsClientStreamBuilder;
 
-use server_harness::{named_test_harness, query_a, query_message};
+use server_harness::{named_test_harness, query_a};
 
 #[test]
 fn test_example_toml_startup() {
@@ -250,7 +250,10 @@ fn test_server_continues_on_bad_data_tcp() {
 }
 
 #[test]
+#[cfg(feature = "trust-dns-resolver")]
 fn test_forward() {
+    use server_harness::query_message;
+
     env_logger::init();
 
     named_test_harness("example_forwarder.toml", |port, _, _| {

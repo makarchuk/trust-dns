@@ -1,4 +1,5 @@
 #![recursion_limit = "128"]
+#![cfg(feature = "trust-dns-resolver")]
 
 extern crate futures;
 extern crate trust_dns;

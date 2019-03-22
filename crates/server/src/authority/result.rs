@@ -10,6 +10,7 @@ use std::fmt;
 use std::io;
 
 use trust_dns::op::ResponseCode;
+#[cfg(feature = "trust-dns-resolver")]
 use trust_dns_resolver::error::ResolveError;
 
 // TODO: should this implement Failure?
@@ -21,6 +22,7 @@ pub enum LookupError {
     /// There was an error performing the lookup
     ResponseCode(ResponseCode),
     /// Resolve Error
+    #[cfg(feature = "trust-dns-resolver")]
     ResolveError(String), /* TODO: what to do here? */
     /// An underlying IO error occured
     Io(String), /* TODO: what to do here? */
@@ -62,6 +64,7 @@ impl fmt::Display for LookupError {
         match self {
             LookupError::NameExists => write!(f, "NameExists"),
             LookupError::ResponseCode(rc) => write!(f, "response_code: {}", rc),
+            #[cfg(feature = "trust-dns-resolver")]
             LookupError::ResolveError(e) => write!(f, "resolve_error: {}", e),
             LookupError::Io(e) => write!(f, "io: {}", e),
         }
@@ -79,6 +82,7 @@ impl From<ResponseCode> for LookupError {
     }
 }
 
+#[cfg(feature = "trust-dns-resolver")]
 impl From<ResolveError> for LookupError {
     fn from(e: ResolveError) -> Self {
         LookupError::ResolveError(e.to_string())
@@ -87,7 +91,7 @@ impl From<ResolveError> for LookupError {
 
 impl From<io::Error> for LookupError {
     fn from(e: io::Error) -> Self {
-        LookupError::ResolveError(e.to_string())
+        LookupError::Io(e.to_string())
     }
 }
 
