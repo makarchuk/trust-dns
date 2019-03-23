@@ -14,9 +14,7 @@ use trust_dns::proto::rr::dnssec::rdata::key::KEY;
 use trust_dns::rr::dnssec::{DnsSecError, DnsSecResult, Signer, SupportedAlgorithms};
 use trust_dns::rr::{LowerName, Name, Record, RecordType};
 
-use authority::result::LookupError;
-use authority::LookupObject;
-use authority::{Authority, MessageRequest, UpdateResult, ZoneType};
+use authority::{Authority, LookupError, MessageRequest, UpdateResult, ZoneType};
 
 /// An Object safe Authority
 pub trait AuthorityObject: Send + Sync {
@@ -247,6 +245,15 @@ where
     fn secure_zone(&mut self) -> DnsSecResult<()> {
         Authority::secure_zone(self)
     }
+}
+
+/// An Object Safe Lookup for Authority
+pub trait LookupObject: Send {
+    /// Returns true if either the associated Records are empty, or this is a NameExists or NxDomain
+    fn is_empty(&self) -> bool;
+
+    /// Conversion to an iterator
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a>;
 }
 
 struct EmptyLookup;
