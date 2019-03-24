@@ -29,6 +29,7 @@ pub struct ForwardAuthority {
 impl ForwardAuthority {
     /// FIXME: drop this?
     #[allow(clippy::new_without_default)]
+    #[doc(hidden)]
     pub fn new() -> Self {
         // FIXME: error here
         let (resolver, bg) = AsyncResolver::from_system_conf().unwrap();
